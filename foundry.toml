@@ -1,0 +1,20 @@
+[profile.default]
+src = 'src'
+out = 'out'
+libs = ['lib']
+solc = "0.8.27"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+remappings = [
+    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "forge-std/=lib/forge-std/src/"
+]
+
+[profile.default.zksync]
+enable_eravm_extensions = true # Note: System contract calls (NonceHolder and ContractDeployer) can only be called with this set to true
+
+[etherscan]
+abstractTestnet = { chain = "11124", url = "https://api-sepolia.abscan.org/api", key = "TACK2D1RGYX9U7MC31SZWWQ7FCWRYQ96AD"}
+abstractMainnet = { chain = "2741", url = "", key = ""} # You can replace these values or leave them blank to override via CLI
