@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Github, TrendingUp } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -40,7 +40,7 @@ export function Header() {
           >
             <Github className="size-4" />
           </a>
-          <Button size="sm">Launch App</Button>
+          <ConnectButton showBalance={false} />
         </nav>
       </div>
     </header>

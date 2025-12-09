@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuroraBackground } from "@/components/ui/aurora-background";
 import { Header } from "@/components/header";
+import { Providers } from "./providers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -38,11 +39,13 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          <AuroraBackground />
-          <div className="relative flex min-h-screen flex-col">
-            <Header />
-            <main className="flex-1">{children}</main>
-          </div>
+          <Providers>
+            <AuroraBackground />
+            <div className="relative flex min-h-screen flex-col">
+              <Header />
+              <main className="flex-1">{children}</main>
+            </div>
+          </Providers>
         </ThemeProvider>
       </body>
     </html>
