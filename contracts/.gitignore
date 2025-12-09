@@ -1,0 +1,19 @@
+# Compiler files
+cache/
+out/
+zkout/
+
+# Dependencies (reinstall with `forge install`)
+lib/
+
+# Broadcast logs
+broadcast/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+
+# Lock file
+foundry.lock

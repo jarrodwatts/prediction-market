@@ -1,66 +1,57 @@
-## Foundry
+# Prediction Market
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+An open source prediction market platform built with Next.js and smart contracts.
 
-Foundry consists of:
+## Features
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+- **Next.js 16** with App Router
+- **Tailwind CSS v4** with OKLCH color system
+- **shadcn/ui** components (New York style)
+- **Dark mode** via next-themes (dark by default)
+- **TypeScript** configured
+- **Smart Contracts** in `/contracts` directory
 
-## Documentation
+## Quick Start
 
-https://book.getfoundry.sh/
+```bash
+# Install dependencies
+pnpm install
 
-## Usage
-
-### Build
-
-```shell
-$ forge build
+# Start development server
+pnpm dev
 ```
 
-### Test
+## Project Structure
 
-```shell
-$ forge test
+```
+├── app/
+│   ├── globals.css      # Theme & CSS variables
+│   ├── layout.tsx       # Root layout with providers
+│   └── page.tsx         # Home page
+├── components/
+│   ├── header.tsx       # Navigation header
+│   ├── theme-provider.tsx
+│   └── ui/              # UI components
+├── contracts/           # Smart contracts
+├── lib/
+│   └── utils.ts         # cn() helper
+└── components.json      # shadcn config
 ```
 
-### Format
+## Adding Components
 
-```shell
-$ forge fmt
+Add shadcn components:
+
+```bash
+pnpm dlx shadcn@latest add card input dialog
 ```
 
-### Gas Snapshots
+## Customization
 
-```shell
-$ forge snapshot
-```
+1. **Colors:** Edit CSS variables in `app/globals.css`
+2. **Fonts:** Change imports in `app/layout.tsx`
+3. **Theme:** Modify ThemeProvider props in `app/layout.tsx`
 
-### Anvil
+## License
 
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+MIT
