@@ -24,6 +24,7 @@ export default function MarketDetailPage() {
 
   const { data: market, isLoading, error } = useQuery({
     queryKey: ['market', id.toString()],
+    refetchInterval: 10000, // Refresh every 10 seconds to catch state changes
     queryFn: async () => {
         if (!publicClient) throw new Error("No client");
 

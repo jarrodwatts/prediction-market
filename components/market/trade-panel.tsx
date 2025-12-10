@@ -6,7 +6,7 @@
  * Interactive panel for buying and selling outcomes using USDC.
  */
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   Tabs,
   TabsList,
@@ -17,8 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, AlertCircle, DollarSign, Wallet, Droplets, Coins, ArrowDownToLine } from "lucide-react";
+import { Loader2, DollarSign, Wallet, Droplets, Coins, ArrowDownToLine } from "lucide-react";
 import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useSendCalls, useCallsStatus } from "wagmi";
 import { useQueryClient } from "@tanstack/react-query";
 import { parseUnits, formatUnits, encodeFunctionData } from "viem";
@@ -91,11 +90,12 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   const [amount, setAmount] = useState("");
   const [sharesToSell, setSharesToSell] = useState("");
   const [liquidityToRemove, setLiquidityToRemove] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [needsApproval, setNeedsApproval] = useState(false);
   const [pendingTxType, setPendingTxType] = useState<"buy" | "sell" | "addLiquidity" | "removeLiquidity" | "claimFees" | "claimLiquidity" | "approve" | null>(null);
   
   const txToast = useTransactionToast();
+  const handledHashRef = useRef<string | null>(null);
+  const handledBatchIdRef = useRef<string | null>(null);
   const { address, isConnected } = useAccount();
   const queryClient = useQueryClient();
   const { writeContract, data: hash, isPending: isWritePending, error: writeError } = useWriteContract();
@@ -190,13 +190,20 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
     }
   }, [amount, usdcAllowance]);
 
-  // Effect to handle transaction success (both single and batched)
+  // Effect to handle transaction success (single tx)
   useEffect(() => {
-    if (isSuccess || isBatchSuccess) {
+    if (isSuccess && hash && hash !== handledHashRef.current) {
+        handledHashRef.current = hash;
+        
+        // Show success toast
+        if (pendingTxType) {
+          txToast.showSuccess(pendingTxType);
+          setPendingTxType(null);
+        }
+        
         setAmount("");
         setSharesToSell("");
         setLiquidityToRemove("");
-        setError(null);
         // Invalidate queries to refresh data
         queryClient.invalidateQueries({ queryKey: ['market-history'] });
         queryClient.invalidateQueries({ queryKey: ['markets-logs'] });
@@ -207,16 +214,57 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
         refetchBalance();
         refetchAllowance();
     }
-  }, [isSuccess, isBatchSuccess, queryClient, refetchShares, refetchUserShares, refetchClaimableFees, refetchClaimStatus, refetchBalance, refetchAllowance]);
+  }, [isSuccess, hash, queryClient, refetchShares, refetchUserShares, refetchClaimableFees, refetchClaimStatus, refetchBalance, refetchAllowance, pendingTxType, txToast]);
+
+  // Effect to handle batched transaction success
+  useEffect(() => {
+    if (isBatchSuccess && batchId && batchId !== handledBatchIdRef.current) {
+        handledBatchIdRef.current = batchId;
+        
+        // Show success toast
+        if (pendingTxType) {
+          txToast.showSuccess(pendingTxType);
+          setPendingTxType(null);
+        }
+        
+        setAmount("");
+        setSharesToSell("");
+        setLiquidityToRemove("");
+        // Invalidate queries to refresh data
+        queryClient.invalidateQueries({ queryKey: ['market-history'] });
+        queryClient.invalidateQueries({ queryKey: ['markets-logs'] });
+        refetchShares();
+        refetchUserShares();
+        refetchClaimableFees();
+        refetchClaimStatus();
+        refetchBalance();
+        refetchAllowance();
+    }
+  }, [isBatchSuccess, batchId, queryClient, refetchShares, refetchUserShares, refetchClaimableFees, refetchClaimStatus, refetchBalance, refetchAllowance, pendingTxType, txToast]);
+
+  // Track errors we've already shown toasts for
+  const handledWriteErrorRef = useRef<Error | null>(null);
+  const handledBatchErrorRef = useRef<Error | null>(null);
 
   useEffect(() => {
-      if (writeError) {
-          setError(writeError.message);
+      if (writeError && writeError !== handledWriteErrorRef.current) {
+          handledWriteErrorRef.current = writeError;
+          if (pendingTxType) {
+            txToast.showError(pendingTxType, writeError.message);
+            setPendingTxType(null);
+          }
       }
-      if (batchError) {
-          setError(batchError.message);
+  }, [writeError, pendingTxType, txToast]);
+
+  useEffect(() => {
+      if (batchError && batchError !== handledBatchErrorRef.current) {
+          handledBatchErrorRef.current = batchError;
+          if (pendingTxType) {
+            txToast.showError(pendingTxType, batchError.message);
+            setPendingTxType(null);
+          }
       }
-  }, [writeError, batchError]);
+  }, [batchError, pendingTxType, txToast]);
 
   const outcomeShares = shares ? shares[1] : [];
   const buyFee = fees ? (fees[0].fee + fees[0].treasuryFee + fees[0].distributorFee) : 0n;
@@ -259,7 +307,6 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
 
   // --- Handlers ---
   const handleApprove = () => {
-    setError(null);
     setPendingTxType("approve");
     txToast.showPending("approve");
     try {
@@ -271,14 +318,12 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
         args: [PREDICTION_MARKET_ADDRESS, BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")]
       });
     } catch (e: any) {
-      setError(e.message);
       txToast.showError("approve", e.message);
       setPendingTxType(null);
     }
   };
 
   const handleBuy = () => {
-      setError(null);
       if (!amount) return;
       
       setPendingTxType("buy");
@@ -318,14 +363,12 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
             });
           }
       } catch (e: any) {
-          setError(e.message);
           txToast.showError("buy", e.message);
           setPendingTxType(null);
       }
   };
 
   const handleSell = () => {
-      setError(null);
       if (!sharesToSell) return;
       
       setPendingTxType("sell");
@@ -341,14 +384,12 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                args: [market.id, BigInt(selectedOutcome), sharesAmount, BigInt("999999999999999999999999")]
            });
       } catch (e: any) {
-          setError(e.message);
           txToast.showError("sell", e.message);
           setPendingTxType(null);
       }
   };
 
   const handleAddLiquidity = () => {
-      setError(null);
       if (!amount) return;
       
       setPendingTxType("addLiquidity");
@@ -388,7 +429,6 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
             });
           }
       } catch (e: any) {
-          setError(e.message);
           txToast.showError("addLiquidity", e.message);
           setPendingTxType(null);
       }
@@ -409,7 +449,6 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   };
 
   const handleRemoveLiquidity = () => {
-      setError(null);
       if (!liquidityToRemove) return;
       
       setPendingTxType("removeLiquidity");
@@ -425,14 +464,12 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
               args: [market.id, sharesAmount]
           });
       } catch (e: any) {
-          setError(e.message);
           txToast.showError("removeLiquidity", e.message);
           setPendingTxType(null);
       }
   };
 
   const handleClaimFees = () => {
-      setError(null);
       setPendingTxType("claimFees");
       txToast.showPending("claimFees");
       
@@ -444,14 +481,12 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
               args: [market.id]
           });
       } catch (e: any) {
-          setError(e.message);
           txToast.showError("claimFees", e.message);
           setPendingTxType(null);
       }
   };
 
   const handleClaimLiquidity = () => {
-      setError(null);
       setPendingTxType("claimLiquidity");
       txToast.showPending("claimLiquidity");
       
@@ -463,7 +498,6 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
               args: [market.id]
           });
       } catch (e: any) {
-          setError(e.message);
           txToast.showError("claimLiquidity", e.message);
           setPendingTxType(null);
       }
@@ -496,14 +530,6 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
         
             <div className="relative overflow-hidden w-full">
             <div className="p-4 sm:p-6 w-full">
-                {error && (
-                    <Alert variant="destructive" className="mb-4">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertTitle>Error</AlertTitle>
-                        <AlertDescription className="break-words">{error}</AlertDescription>
-                    </Alert>
-                )}
-                
                 <TabsContents>
                     <TabsContent value="buy" className="p-1">
                     <div className="space-y-4">

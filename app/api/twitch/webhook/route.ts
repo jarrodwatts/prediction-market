@@ -19,6 +19,29 @@ import { createMarketWithLiquidity, resolveMarket, voidMarket } from '@/lib/liqu
 // Protocol treasury address (update with actual address)
 const PROTOCOL_TREASURY = process.env.PROTOCOL_TREASURY_ADDRESS || '0x0000000000000000000000000000000000000000'
 
+// In-memory cache to track processed message IDs (prevents duplicate webhook processing)
+// Note: In production with multiple instances, use Redis/KV instead
+const processedMessageIds = new Set<string>()
+const MAX_PROCESSED_IDS = 1000 // Prevent memory leak
+
+function markMessageProcessed(messageId: string): boolean {
+  if (processedMessageIds.has(messageId)) {
+    return false // Already processed
+  }
+  
+  // Clean up old entries if too many
+  if (processedMessageIds.size >= MAX_PROCESSED_IDS) {
+    const iterator = processedMessageIds.values()
+    for (let i = 0; i < 100; i++) {
+      const val = iterator.next().value
+      if (val) processedMessageIds.delete(val)
+    }
+  }
+  
+  processedMessageIds.add(messageId)
+  return true // First time seeing this message
+}
+
 /**
  * Fetch Twitch user's profile image URL
  */
@@ -165,6 +188,12 @@ export async function POST(request: NextRequest) {
     
     // Handle notifications
     if (headers.messageType === MESSAGE_TYPE_NOTIFICATION) {
+      // DEDUPLICATION: Check if we've already processed this message
+      if (!markMessageProcessed(headers.messageId)) {
+        console.log(`⏭️ Duplicate message ${headers.messageId}, skipping`)
+        return NextResponse.json({ received: true })
+      }
+      
       const subscriptionType = payload.subscription.type
       const event = payload.event
       
@@ -201,6 +230,13 @@ export async function POST(request: NextRequest) {
  */
 async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
   console.log(`🎯 Prediction started: ${event.title}`)
+  
+  // IDEMPOTENCY CHECK: Skip if we've already created a market for this prediction
+  const existingMarket = await getPredictionData(event.id)
+  if (existingMarket) {
+    console.log(`⏭️ Market already exists for prediction ${event.id} (market ID: ${existingMarket.marketId}), skipping`)
+    return
+  }
   
   // Get streamer session to find their wallet address
   const streamerSession = await getStreamerSession(event.broadcaster_user_id)

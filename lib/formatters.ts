@@ -189,7 +189,17 @@ export function formatChartDate(
   timestamp: number,
   timeframe: "24h" | "7d" | "30d" | "all"
 ): string {
+  // Handle invalid input
+  if (timestamp === undefined || timestamp === null || isNaN(timestamp)) {
+    return "";
+  }
+
   const date = new Date(timestamp * 1000);
+  
+  // Verify the date is valid
+  if (isNaN(date.getTime())) {
+    return "";
+  }
 
   if (timeframe === "24h") {
     return date.toLocaleTimeString("en-US", {
@@ -221,7 +231,18 @@ export function formatChartDate(
  * @returns Formatted tooltip string (e.g., "Nov 27, 3:45 PM")
  */
 export function formatTooltipDate(timestamp: number): string {
+  // Handle invalid input
+  if (timestamp === undefined || timestamp === null || isNaN(timestamp)) {
+    return "";
+  }
+
   const date = new Date(timestamp * 1000);
+  
+  // Verify the date is valid
+  if (isNaN(date.getTime())) {
+    return "";
+  }
+
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",

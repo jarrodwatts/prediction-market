@@ -76,9 +76,31 @@ export async function POST(request: NextRequest) {
       'channel.prediction.end',
     ]
 
+    // First, check existing subscriptions to avoid duplicates
+    const existingResponse = await fetch(TWITCH_API_URL, {
+      headers: {
+        'Authorization': `Bearer ${appAccessToken}`,
+        'Client-Id': clientId,
+      },
+    })
+    const existingData = await existingResponse.json()
+    const existingSubscriptions = existingData.data?.filter(
+      (sub: any) => sub.condition?.broadcaster_user_id === session.twitchId && sub.status === 'enabled'
+    ) || []
+    
+    const existingTypes = new Set(existingSubscriptions.map((sub: any) => sub.type))
+    console.log(`📋 Found ${existingSubscriptions.length} existing subscriptions:`, Array.from(existingTypes))
+
     const results = []
 
     for (const type of eventTypes) {
+      // Skip if subscription already exists
+      if (existingTypes.has(type)) {
+        console.log(`⏭️ Already subscribed to ${type}, skipping`)
+        results.push({ type, success: true, skipped: true })
+        continue
+      }
+      
       try {
         const response = await fetch(TWITCH_API_URL, {
           method: 'POST',
@@ -106,6 +128,10 @@ export async function POST(request: NextRequest) {
         if (response.ok) {
           console.log(`✅ Subscribed to ${type}`)
           results.push({ type, success: true, id: data.data?.[0]?.id })
+        } else if (response.status === 409) {
+          // Subscription already exists (race condition)
+          console.log(`⏭️ ${type} already exists (409), skipping`)
+          results.push({ type, success: true, skipped: true })
         } else {
           console.error(`❌ Failed to subscribe to ${type}:`, data)
           results.push({ type, success: false, error: data.message || data.error })
