@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "build:extension": "EXPORT_EXTENSION=true next build",
+    "zip:extension": "cd extension-dist && zip -r ../twitch-extension.zip ."
   },
   "dependencies": {
     "@abstract-foundation/agw-client": "^1.10.0",

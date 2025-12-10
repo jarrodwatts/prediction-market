@@ -10,6 +10,18 @@ const publicClient = createPublicClient({
   transport: http(),
 })
 
+// CORS headers for Twitch extension
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+}
+
+// Handle preflight requests
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: corsHeaders })
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -18,7 +30,7 @@ export async function GET(request: NextRequest) {
     if (!channelId) {
       return NextResponse.json(
         { error: 'channelId is required' },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       )
     }
 
@@ -28,7 +40,7 @@ export async function GET(request: NextRequest) {
     if (!activePredictionId) {
       return NextResponse.json(
         { error: 'No active prediction' },
-        { status: 404 }
+        { status: 404, headers: corsHeaders }
       )
     }
 
@@ -38,7 +50,7 @@ export async function GET(request: NextRequest) {
     if (!predictionData) {
       return NextResponse.json(
         { error: 'Prediction data not found' },
-        { status: 404 }
+        { status: 404, headers: corsHeaders }
       )
     }
 
@@ -84,7 +96,7 @@ export async function GET(request: NextRequest) {
         closesAt: Number(closesAt),
         liquidity: liquidity.toString(),
         balance: balance.toString(),
-      })
+      }, { headers: corsHeaders })
     } catch (contractError) {
       console.error('Error reading contract:', contractError)
       
@@ -99,13 +111,13 @@ export async function GET(request: NextRequest) {
         closesAt: predictionData.locksAt,
         liquidity: '0',
         balance: '0',
-      })
+      }, { headers: corsHeaders })
     }
   } catch (error) {
     console.error('Error getting active market:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
-      { status: 500 }
+      { status: 500, headers: corsHeaders }
     )
   }
 }

@@ -204,12 +204,12 @@ export async function resolveMarket(
   }
   
   // Either market is closed OR time has passed (contract will auto-transition)
-  console.log(`📝 Calling creatorResolveMarketOutcome for market ${marketId} with outcome ${outcomeId}`)
+  console.log(`📝 Calling adminResolveMarketOutcome for market ${marketId} with outcome ${outcomeId}`)
   
   const txHash = await walletClient.writeContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'creatorResolveMarketOutcome',
+    functionName: 'adminResolveMarketOutcome',
     args: [marketId, BigInt(outcomeId)],
   })
   
@@ -240,13 +240,15 @@ export async function lockMarket(marketId: bigint): Promise<string> {
     return ''
   }
   
-  console.log(`🔒 Locking market ${marketId}`)
+  console.log(`🔒 Locking market ${marketId} by setting closeDate to now`)
   
+  // Lock market by setting closeDate to current time
+  const now = BigInt(Math.floor(Date.now() / 1000))
   const txHash = await walletClient.writeContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'creatorLockMarket',
-    args: [marketId],
+    functionName: 'adminSetMarketCloseDate',
+    args: [marketId, now],
   })
   
   await publicClient.waitForTransactionReceipt({ hash: txHash })
@@ -294,7 +296,7 @@ export async function voidMarket(marketId: bigint): Promise<string> {
   const txHash = await walletClient.writeContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'creatorResolveMarketOutcome',
+    functionName: 'adminResolveMarketOutcome',
     args: [marketId, voidOutcomeId],
   })
   
