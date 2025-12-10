@@ -1,0 +1,530 @@
+/* Reset and Base Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  font-size: 14px;
+  color: #fff;
+  background: transparent;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ========================
+   VIDEO OVERLAY STYLES
+   ======================== */
+
+.overlay-container {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  z-index: 9999;
+}
+
+/* Minimized View */
+.minimized-view {
+  display: flex;
+  align-items: center;
+}
+
+.expand-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+}
+
+.expand-btn:hover {
+  background: rgba(0, 0, 0, 0.95);
+  transform: scale(1.05);
+}
+
+.expand-btn .icon {
+  font-size: 18px;
+}
+
+.expand-btn .badge {
+  background: #9147ff;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Expanded View */
+.expanded-view {
+  background: rgba(0, 0, 0, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  min-width: 320px;
+  max-width: 380px;
+  backdrop-filter: blur(20px);
+  overflow: hidden;
+}
+
+.overlay-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.overlay-header .icon {
+  font-size: 20px;
+}
+
+.overlay-header .title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapse-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: background 0.2s;
+}
+
+.collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Outcomes */
+.outcomes-container {
+  padding: 12px 16px;
+}
+
+.outcomes-list {
+  display: flex;
+  gap: 10px;
+}
+
+.outcome-btn {
+  flex: 1;
+  padding: 16px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.outcome-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.outcome-btn.selected {
+  border-color: #9147ff;
+  background: rgba(145, 71, 255, 0.2);
+}
+
+.outcome-btn.yes {
+  border-color: rgba(0, 200, 83, 0.3);
+}
+
+.outcome-btn.yes:hover,
+.outcome-btn.yes.selected {
+  background: rgba(0, 200, 83, 0.2);
+  border-color: #00c853;
+}
+
+.outcome-btn.no {
+  border-color: rgba(255, 82, 82, 0.3);
+}
+
+.outcome-btn.no:hover,
+.outcome-btn.no.selected {
+  background: rgba(255, 82, 82, 0.2);
+  border-color: #ff5252;
+}
+
+.outcome-title {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 4px;
+  color: #fff;
+}
+
+.outcome-odds {
+  font-size: 24px;
+  font-weight: 700;
+  color: #9147ff;
+}
+
+.outcome-btn.yes .outcome-odds {
+  color: #00c853;
+}
+
+.outcome-btn.no .outcome-odds {
+  color: #ff5252;
+}
+
+/* Bet Amounts */
+.bet-amounts {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.bet-btn {
+  flex: 1;
+  padding: 10px;
+  background: rgba(145, 71, 255, 0.2);
+  border: 1px solid rgba(145, 71, 255, 0.4);
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bet-btn:hover {
+  background: rgba(145, 71, 255, 0.4);
+}
+
+.bet-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Footer */
+.overlay-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Connect State */
+.connect-state {
+  padding: 20px 16px;
+  text-align: center;
+}
+
+.connect-btn {
+  margin-top: 12px;
+  padding: 12px 24px;
+  background: #9147ff;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.connect-btn:hover {
+  background: #772ce8;
+}
+
+/* Loading State */
+.loading-state {
+  padding: 30px 16px;
+  text-align: center;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(145, 71, 255, 0.3);
+  border-top-color: #9147ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Error State */
+.error-state {
+  padding: 20px 16px;
+  text-align: center;
+  color: #ff5252;
+}
+
+.retry-btn {
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid rgba(255, 82, 82, 0.5);
+  border-radius: 6px;
+  color: #ff5252;
+  cursor: pointer;
+}
+
+/* No Market State */
+.no-market {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 24px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+}
+
+/* ========================
+   CONFIG PAGE STYLES
+   ======================== */
+
+.config-body {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.config-container {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.config-header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.config-header h1 {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.config-header p {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Config Steps */
+.config-step {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.config-step.completed {
+  border-color: rgba(0, 200, 83, 0.3);
+}
+
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.step-number {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(145, 71, 255, 0.2);
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.config-step.completed .step-number {
+  background: rgba(0, 200, 83, 0.2);
+  color: #00c853;
+}
+
+.step-title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.step-content {
+  padding: 16px;
+}
+
+.step-content p {
+  margin-bottom: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+}
+
+.channel-name {
+  font-family: monospace;
+  color: #9147ff !important;
+}
+
+/* Wallet Status */
+.wallet-status,
+.wallet-connected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.wallet-connected {
+  background: rgba(0, 200, 83, 0.1);
+}
+
+.wallet-address {
+  font-family: monospace;
+  font-size: 13px;
+}
+
+/* Buttons */
+.primary-btn {
+  display: inline-block;
+  padding: 12px 24px;
+  background: #9147ff;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.2s;
+}
+
+.primary-btn:hover {
+  background: #772ce8;
+}
+
+/* Auth Status */
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(0, 200, 83, 0.1);
+  border-radius: 8px;
+  color: #00c853;
+}
+
+/* Settings */
+.config-settings,
+.config-stats {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.config-settings h2,
+.config-stats h2,
+.config-info h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.setting-group {
+  margin-bottom: 16px;
+}
+
+.setting-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.setting-description {
+  font-size: 13px !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  margin-bottom: 8px !important;
+}
+
+.setting-group input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.stat-value {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  color: #9147ff;
+  margin-bottom: 4px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Info Section */
+.config-info {
+  background: rgba(145, 71, 255, 0.1);
+  border: 1px solid rgba(145, 71, 255, 0.2);
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.config-info ol {
+  padding-left: 20px;
+}
+
+.config-info li {
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.config-info strong {
+  color: #9147ff;
+}
+

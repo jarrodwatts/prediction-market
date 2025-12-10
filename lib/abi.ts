@@ -64,6 +64,16 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     type: "function",
+    name: "creatorResolveMarketOutcome",
+    inputs: [
+      { name: "marketId", type: "uint256", internalType: "uint256" },
+      { name: "outcomeId", type: "uint256", internalType: "uint256" },
+    ],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     name: "adminSetMarketCloseDate",
     inputs: [
       { name: "marketId", type: "uint256", internalType: "uint256" },

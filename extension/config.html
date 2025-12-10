@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prediction Market - Streamer Setup</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="config-body">
+  <!-- Twitch Extension Helper -->
+  <script src="https://extension-files.twitch.tv/helper/v1/twitch-ext.min.js"></script>
+  
+  <div class="config-container">
+    <div class="config-header">
+      <h1>🎯 Prediction Market Setup</h1>
+      <p>Let your viewers bet real USDC on your predictions</p>
+    </div>
+    
+    <!-- Step 1: Connect Twitch (handled by extension install) -->
+    <div class="config-step completed" id="step-twitch">
+      <div class="step-header">
+        <span class="step-number">✓</span>
+        <span class="step-title">Twitch Connected</span>
+      </div>
+      <div class="step-content">
+        <p>Your Twitch account is connected via the extension.</p>
+        <p class="channel-name" id="channel-name">Channel: Loading...</p>
+      </div>
+    </div>
+    
+    <!-- Step 2: Connect Wallet -->
+    <div class="config-step" id="step-wallet">
+      <div class="step-header">
+        <span class="step-number">2</span>
+        <span class="step-title">Connect Your Wallet</span>
+      </div>
+      <div class="step-content">
+        <p>Connect your wallet to receive fees from bets on your predictions.</p>
+        <div id="wallet-status" class="wallet-status">
+          <span class="status-icon">⏳</span>
+          <span class="status-text">Not connected</span>
+        </div>
+        <button id="connect-wallet-btn" class="primary-btn">Connect Wallet</button>
+        <div id="wallet-connected" class="wallet-connected hidden">
+          <span class="status-icon">✓</span>
+          <span class="wallet-address" id="wallet-address">0x...</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Step 3: Authorize EventSub -->
+    <div class="config-step" id="step-eventsub">
+      <div class="step-header">
+        <span class="step-number">3</span>
+        <span class="step-title">Enable Prediction Sync</span>
+      </div>
+      <div class="step-content">
+        <p>Authorize us to listen to your Twitch predictions so we can automatically create markets.</p>
+        <a id="authorize-btn" class="primary-btn" href="#" target="_blank">Authorize with Twitch</a>
+        <div id="auth-status" class="auth-status hidden">
+          <span class="status-icon">✓</span>
+          <span class="status-text">Prediction sync enabled</span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Settings (shown after setup complete) -->
+    <div class="config-settings hidden" id="settings-section">
+      <h2>Settings</h2>
+      
+      <div class="setting-group">
+        <label for="liquidity-amount">Default Market Liquidity (USDC)</label>
+        <p class="setting-description">How much USDC to seed each market with. This affects the maximum bet size.</p>
+        <input type="number" id="liquidity-amount" value="100" min="10" max="1000" step="10">
+      </div>
+      
+      <button id="save-settings-btn" class="primary-btn">Save Settings</button>
+    </div>
+    
+    <!-- How it Works -->
+    <div class="config-info">
+      <h2>How it Works</h2>
+      <ol>
+        <li>You create a prediction on Twitch as usual</li>
+        <li>We automatically create a USDC market mirroring your prediction</li>
+        <li>Viewers can bet real money through the overlay</li>
+        <li>When you resolve the Twitch prediction, we resolve the market</li>
+        <li>You earn <strong>1.5% of all bets</strong> as fees!</li>
+      </ol>
+    </div>
+    
+    <!-- Stats (shown after setup complete) -->
+    <div class="config-stats hidden" id="stats-section">
+      <h2>Your Stats</h2>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-value" id="total-markets">0</span>
+          <span class="stat-label">Markets Created</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="total-volume">$0</span>
+          <span class="stat-label">Total Volume</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="total-fees">$0</span>
+          <span class="stat-label">Fees Earned</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="js/config.js"></script>
+</body>
+</html>
+

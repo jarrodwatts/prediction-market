@@ -1,4 +1,4 @@
-import { getDefaultConfig } from '@rainbow-me/rainbowkit'
+import { createConfig, http } from 'wagmi'
 import { type Chain } from 'viem'
 
 export const abstractTestnet = {
@@ -14,9 +14,10 @@ export const abstractTestnet = {
   testnet: true,
 } as const satisfies Chain
 
-export const config = getDefaultConfig({
-  appName: 'Prediction Market',
-  projectId: '3fcc6bba6f1d54709f13afbf12dc1885', // Using a public demo ID or placeholder. 
+export const config = createConfig({
   chains: [abstractTestnet],
+  transports: {
+    [abstractTestnet.id]: http(),
+  },
   ssr: true,
 })

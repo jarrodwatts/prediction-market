@@ -2,21 +2,20 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
-import { WagmiProvider } from 'wagmi'
-import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit'
-import { config } from '@/lib/wagmi'
-import '@rainbow-me/rainbowkit/styles.css'
+import { AbstractWalletProvider } from '@abstract-foundation/agw-react'
+import { SessionProvider } from 'next-auth/react'
+import { abstractTestnet } from '@/lib/wagmi'
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient())
 
   return (
-    <WagmiProvider config={config}>
-      <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider theme={darkTheme()}>
+    <SessionProvider>
+      <AbstractWalletProvider chain={abstractTestnet}>
+        <QueryClientProvider client={queryClient}>
           {children}
-        </RainbowKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+        </QueryClientProvider>
+      </AbstractWalletProvider>
+    </SessionProvider>
   )
 }

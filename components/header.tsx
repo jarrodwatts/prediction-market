@@ -2,8 +2,52 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Github, TrendingUp } from "lucide-react";
-import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { Github, TrendingUp, Wallet, LogOut, Loader2 } from "lucide-react";
+import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react';
+import { Button } from "@/components/ui/button";
+
+function WalletButton() {
+  const { login, logout } = useLoginWithAbstract();
+  const { data: abstractClient, isLoading } = useAbstractClient();
+  const [address, setAddress] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (abstractClient) {
+      abstractClient.account.address && setAddress(abstractClient.account.address);
+    } else {
+      setAddress(null);
+    }
+  }, [abstractClient]);
+
+  if (isLoading) {
+    return (
+      <Button variant="outline" size="sm" disabled>
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        Loading...
+      </Button>
+    );
+  }
+
+  if (address) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted-foreground font-mono">
+          {address.slice(0, 6)}...{address.slice(-4)}
+        </span>
+        <Button variant="ghost" size="sm" onClick={() => logout()}>
+          <LogOut className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button variant="default" size="sm" onClick={() => login()}>
+      <Wallet className="mr-2 h-4 w-4" />
+      Connect
+    </Button>
+  );
+}
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -40,7 +84,7 @@ export function Header() {
           >
             <Github className="size-4" />
           </a>
-          <ConnectButton showBalance={false} />
+          <WalletButton />
         </nav>
       </div>
     </header>

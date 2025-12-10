@@ -898,6 +898,26 @@ contract PredictionMarket is ReentrancyGuard, Ownable {
     return market.resolution.outcomeId;
   }
 
+  /// @dev Resolves the market to a specific outcome (creator only)
+  function creatorResolveMarketOutcome(uint256 marketId, uint256 outcomeId)
+    external
+    isMarket(marketId)
+    notAtState(marketId, MarketState.resolved)
+    transitionLast(marketId)
+    returns (uint256)
+  {
+    Market storage market = markets[marketId];
+
+    require(msg.sender == market.creator, "Only creator can resolve");
+
+    market.resolution.outcomeId = outcomeId;
+
+    emit MarketResolved(msg.sender, marketId, outcomeId, block.timestamp, false);
+    _emitMarketActionEvents(marketId);
+
+    return market.resolution.outcomeId;
+  }
+
   /// @dev pauses a market, no trading allowed
   function adminPauseMarket(uint256 marketId) external onlyOwner isMarket(marketId) notPaused(marketId) nonReentrant {
     Market storage market = markets[marketId];

@@ -3,7 +3,7 @@
 /**
  * Trade Panel Component
  * 
- * Interactive panel for buying and selling outcomes.
+ * Interactive panel for buying and selling outcomes using USDC.
  */
 
 import { useState, useMemo, useEffect } from "react";
@@ -14,22 +14,57 @@ import {
   TabsContent,
   TabsContents,
 } from "@/components/animate-ui/components/animate/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, AlertCircle, DollarSign, Wallet, Droplets, Coins, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
-import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useBalance } from "wagmi";
+import { Loader2, AlertCircle, DollarSign, Wallet, Droplets, Coins, ArrowDownToLine } from "lucide-react";
+import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useSendCalls, useCallsStatus } from "wagmi";
 import { useQueryClient } from "@tanstack/react-query";
-import { parseEther, formatEther } from "viem";
+import { parseUnits, formatUnits, encodeFunctionData } from "viem";
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
 import { abstractTestnet } from "@/lib/wagmi";
 import { calcBuyAmount, calcSellAmount, getPrice } from "@/lib/market-math";
 import type { MarketData } from "@/lib/types";
 import { getOutcomeColor, getOutcomeClasses } from "@/lib/outcome-colors";
-import { formatCurrency, formatShares } from "@/lib/formatters";
+import { formatShares } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { useTransactionToast } from "@/lib/use-transaction-toast";
+
+// USDC configuration
+const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`;
+const USDC_DECIMALS = 6;
+
+// ERC20 ABI for approval and balance
+const ERC20_ABI = [
+  {
+    type: 'function',
+    name: 'approve',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ type: 'bool' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'allowance',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' },
+    ],
+    outputs: [{ type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'balanceOf',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+    stateMutability: 'view',
+  },
+] as const;
 
 interface TradePanelProps {
   market: MarketData;
@@ -39,6 +74,16 @@ interface TradePanelProps {
 
 type TabType = "buy" | "sell" | "liquidity";
 
+// Helper to format USDC amounts
+function formatUSDC(value: bigint): string {
+  return formatUnits(value, USDC_DECIMALS);
+}
+
+// Helper to parse USDC amounts
+function parseUSDC(value: string): bigint {
+  return parseUnits(value, USDC_DECIMALS);
+}
+
 export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("buy");
   const [liquidityTab, setLiquidityTab] = useState<"add" | "remove">("add");
@@ -47,18 +92,45 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   const [sharesToSell, setSharesToSell] = useState("");
   const [liquidityToRemove, setLiquidityToRemove] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [needsApproval, setNeedsApproval] = useState(false);
+  const [pendingTxType, setPendingTxType] = useState<"buy" | "sell" | "addLiquidity" | "removeLiquidity" | "claimFees" | "claimLiquidity" | "approve" | null>(null);
   
+  const txToast = useTransactionToast();
   const { address, isConnected } = useAccount();
-  const { data: ethBalance } = useBalance({ 
-    address,
-    chainId: abstractTestnet.id,
+  const queryClient = useQueryClient();
+  const { writeContract, data: hash, isPending: isWritePending, error: writeError } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+  
+  // Batched calls for approve + action (AGW feature)
+  const { sendCalls, data: batchCallsData, isPending: isBatchPending, error: batchError } = useSendCalls();
+  const batchId = typeof batchCallsData === 'string' ? batchCallsData : batchCallsData?.id;
+  const { data: batchStatus } = useCallsStatus({
+    id: batchId!,
+    query: { enabled: !!batchId },
+  });
+  const isBatchSuccess = batchStatus?.status === 'success';
+
+  // USDC Balance
+  const { data: usdcBalance, refetch: refetchBalance } = useReadContract({
+    address: USDC_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: [address!],
     query: {
       enabled: isConnected && !!address,
     }
   });
-  const queryClient = useQueryClient();
-  const { writeContract, data: hash, isPending: isWritePending, error: writeError } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+
+  // USDC Allowance
+  const { data: usdcAllowance, refetch: refetchAllowance } = useReadContract({
+    address: USDC_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: [address!, PREDICTION_MARKET_ADDRESS],
+    query: {
+      enabled: isConnected && !!address,
+    }
+  });
 
   const { data: shares, refetch: refetchShares } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
@@ -104,9 +176,23 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
     }
   });
 
-  // Effect to handle transaction success
+  // Check if approval is needed
   useEffect(() => {
-    if (isSuccess) {
+    if (amount && usdcAllowance !== undefined) {
+      try {
+        const amountBigInt = parseUSDC(amount);
+        setNeedsApproval(usdcAllowance < amountBigInt);
+      } catch {
+        setNeedsApproval(false);
+      }
+    } else {
+      setNeedsApproval(false);
+    }
+  }, [amount, usdcAllowance]);
+
+  // Effect to handle transaction success (both single and batched)
+  useEffect(() => {
+    if (isSuccess || isBatchSuccess) {
         setAmount("");
         setSharesToSell("");
         setLiquidityToRemove("");
@@ -118,14 +204,19 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
         refetchUserShares();
         refetchClaimableFees();
         refetchClaimStatus();
+        refetchBalance();
+        refetchAllowance();
     }
-  }, [isSuccess, queryClient, refetchShares, refetchUserShares, refetchClaimableFees, refetchClaimStatus]);
+  }, [isSuccess, isBatchSuccess, queryClient, refetchShares, refetchUserShares, refetchClaimableFees, refetchClaimStatus, refetchBalance, refetchAllowance]);
 
   useEffect(() => {
       if (writeError) {
           setError(writeError.message);
       }
-  }, [writeError]);
+      if (batchError) {
+          setError(batchError.message);
+      }
+  }, [writeError, batchError]);
 
   const outcomeShares = shares ? shares[1] : [];
   const buyFee = fees ? (fees[0].fee + fees[0].treasuryFee + fees[0].distributorFee) : 0n;
@@ -141,15 +232,18 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   const userClaimableFees = claimableFees ?? 0n;
   
   // Claim status flags
-  const canClaimLiquidity = claimStatus ? claimStatus[2] && !claimStatus[3] : false; // liquidityToClaim && !liquidityClaimed
+  const canClaimLiquidity = claimStatus ? claimStatus[2] && !claimStatus[3] : false;
 
   // --- Calculations ---
+  // Note: Market math uses 18 decimals internally, we need to scale USDC (6 decimals) up
   const simulatedBuyShares = useMemo(() => {
     if (!outcomeShares.length || !amount) return 0n;
     try {
-        const val = parseEther(amount);
+        const val = parseUSDC(amount);
         if (val === 0n) return 0n;
-        return calcBuyAmount(val, selectedOutcome, [...outcomeShares], buyFee);
+        // Scale up to 18 decimals for market math
+        const scaledVal = val * BigInt(10 ** 12);
+        return calcBuyAmount(scaledVal, selectedOutcome, [...outcomeShares], buyFee);
     } catch (e) {
         return 0n;
     }
@@ -164,65 +258,152 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   }, [market.outcomeCount, outcomeShares, liquidity]);
 
   // --- Handlers ---
+  const handleApprove = () => {
+    setError(null);
+    setPendingTxType("approve");
+    txToast.showPending("approve");
+    try {
+      // Approve max uint256 for convenience
+      writeContract({
+        address: USDC_ADDRESS,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [PREDICTION_MARKET_ADDRESS, BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")]
+      });
+    } catch (e: any) {
+      setError(e.message);
+      txToast.showError("approve", e.message);
+      setPendingTxType(null);
+    }
+  };
+
   const handleBuy = () => {
       setError(null);
       if (!amount) return;
+      
+      setPendingTxType("buy");
+      txToast.showPending("buy", `Buying ${selectedOutcome === 0 ? "Yes" : "No"} shares for $${amount}`);
+      
       try {
-          writeContract({
-              address: PREDICTION_MARKET_ADDRESS,
-              abi: PREDICTION_MARKET_ABI,
-              functionName: 'buyWithETH',
-              args: [market.id, BigInt(selectedOutcome), 0n], // 0n minShares for now
-              value: parseEther(amount)
-          });
+          const amountBigInt = parseUSDC(amount);
+          
+          if (needsApproval) {
+            // Batch approve + buy in a single transaction (AGW feature)
+            sendCalls({
+              calls: [
+                {
+                  to: USDC_ADDRESS,
+                  data: encodeFunctionData({
+                    abi: ERC20_ABI,
+                    functionName: 'approve',
+                    args: [PREDICTION_MARKET_ADDRESS, amountBigInt],
+                  }),
+                },
+                {
+                  to: PREDICTION_MARKET_ADDRESS,
+                  data: encodeFunctionData({
+                    abi: PREDICTION_MARKET_ABI,
+                    functionName: 'buy',
+                    args: [market.id, BigInt(selectedOutcome), 0n, amountBigInt],
+                  }),
+                },
+              ],
+            });
+          } else {
+            writeContract({
+                address: PREDICTION_MARKET_ADDRESS,
+                abi: PREDICTION_MARKET_ABI,
+                functionName: 'buy',
+                args: [market.id, BigInt(selectedOutcome), 0n, amountBigInt]
+            });
+          }
       } catch (e: any) {
           setError(e.message);
+          txToast.showError("buy", e.message);
+          setPendingTxType(null);
       }
   };
 
   const handleSell = () => {
       setError(null);
       if (!sharesToSell) return;
+      
+      setPendingTxType("sell");
+      txToast.showPending("sell", `Selling ${sharesToSell} ${selectedOutcome === 0 ? "Yes" : "No"} shares`);
+      
       try {
+           // Shares are in 18 decimals
+           const sharesAmount = parseUnits(sharesToSell, 18);
            writeContract({
                address: PREDICTION_MARKET_ADDRESS,
                abi: PREDICTION_MARKET_ABI,
-               functionName: 'sellToETH',
-               args: [market.id, BigInt(selectedOutcome), parseEther(sharesToSell), 999999999999999999999999n]
+               functionName: 'sell',
+               args: [market.id, BigInt(selectedOutcome), sharesAmount, BigInt("999999999999999999999999")]
            });
       } catch (e: any) {
           setError(e.message);
+          txToast.showError("sell", e.message);
+          setPendingTxType(null);
       }
   };
 
   const handleAddLiquidity = () => {
       setError(null);
       if (!amount) return;
+      
+      setPendingTxType("addLiquidity");
+      txToast.showPending("addLiquidity", `Adding $${amount} to liquidity pool`);
+      
       try {
-          writeContract({
-              address: PREDICTION_MARKET_ADDRESS,
-              abi: PREDICTION_MARKET_ABI,
-              functionName: 'addLiquidityWithETH',
-              args: [market.id],
-              value: parseEther(amount)
-          });
+          const amountBigInt = parseUSDC(amount);
+          
+          if (needsApproval) {
+            // Batch approve + addLiquidity in a single transaction (AGW feature)
+            sendCalls({
+              calls: [
+                {
+                  to: USDC_ADDRESS,
+                  data: encodeFunctionData({
+                    abi: ERC20_ABI,
+                    functionName: 'approve',
+                    args: [PREDICTION_MARKET_ADDRESS, amountBigInt],
+                  }),
+                },
+                {
+                  to: PREDICTION_MARKET_ADDRESS,
+                  data: encodeFunctionData({
+                    abi: PREDICTION_MARKET_ABI,
+                    functionName: 'addLiquidity',
+                    args: [market.id, amountBigInt],
+                  }),
+                },
+              ],
+            });
+          } else {
+            writeContract({
+                address: PREDICTION_MARKET_ADDRESS,
+                abi: PREDICTION_MARKET_ABI,
+                functionName: 'addLiquidity',
+                args: [market.id, amountBigInt]
+            });
+          }
       } catch (e: any) {
           setError(e.message);
+          txToast.showError("addLiquidity", e.message);
+          setPendingTxType(null);
       }
   };
 
   const handlePercentageClick = (percentage: number) => {
-    if (ethBalance?.value) {
-        const value = (Number(ethBalance.value) * percentage) / 1e18;
-        // Leave a little for gas if 100%
-        const adjustedValue = percentage === 1 ? Math.max(0, value - 0.005) : value; 
-        setAmount(adjustedValue.toFixed(4));
+    if (usdcBalance) {
+        const value = Number(formatUSDC(usdcBalance)) * percentage;
+        setAmount(value.toFixed(2));
     }
   };
 
   const handleSellPercentageClick = (percentage: number) => {
     if (userSelectedOutcomeShares > 0n) {
-        const value = Number(formatEther(userSelectedOutcomeShares)) * percentage;
+        const value = Number(formatUnits(userSelectedOutcomeShares, 18)) * percentage;
         setSharesToSell(value.toFixed(4));
     }
   };
@@ -230,54 +411,72 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   const handleRemoveLiquidity = () => {
       setError(null);
       if (!liquidityToRemove) return;
+      
+      setPendingTxType("removeLiquidity");
+      txToast.showPending("removeLiquidity", `Withdrawing ${liquidityToRemove} LP tokens`);
+      
       try {
+          // LP shares are in 18 decimals
+          const sharesAmount = parseUnits(liquidityToRemove, 18);
           writeContract({
               address: PREDICTION_MARKET_ADDRESS,
               abi: PREDICTION_MARKET_ABI,
-              functionName: 'removeLiquidityToETH',
-              args: [market.id, parseEther(liquidityToRemove)]
+              functionName: 'removeLiquidity',
+              args: [market.id, sharesAmount]
           });
       } catch (e: any) {
           setError(e.message);
+          txToast.showError("removeLiquidity", e.message);
+          setPendingTxType(null);
       }
   };
 
   const handleClaimFees = () => {
       setError(null);
+      setPendingTxType("claimFees");
+      txToast.showPending("claimFees");
+      
       try {
           writeContract({
               address: PREDICTION_MARKET_ADDRESS,
               abi: PREDICTION_MARKET_ABI,
-              functionName: 'claimFeesToETH',
+              functionName: 'claimFees',
               args: [market.id]
           });
       } catch (e: any) {
           setError(e.message);
+          txToast.showError("claimFees", e.message);
+          setPendingTxType(null);
       }
   };
 
   const handleClaimLiquidity = () => {
       setError(null);
+      setPendingTxType("claimLiquidity");
+      txToast.showPending("claimLiquidity");
+      
       try {
           writeContract({
               address: PREDICTION_MARKET_ADDRESS,
               abi: PREDICTION_MARKET_ABI,
-              functionName: 'claimLiquidityToETH',
+              functionName: 'claimLiquidity',
               args: [market.id]
           });
       } catch (e: any) {
           setError(e.message);
+          txToast.showError("claimLiquidity", e.message);
+          setPendingTxType(null);
       }
   };
 
   const handleLiquidityPercentageClick = (percentage: number) => {
     if (userLiquidity > 0n) {
-        const value = Number(formatEther(userLiquidity)) * percentage;
+        const value = Number(formatUnits(userLiquidity, 18)) * percentage;
         setLiquidityToRemove(value.toFixed(4));
     }
   };
 
-  const isLoading = isWritePending || isConfirming;
+  const isLoading = isWritePending || isConfirming || isBatchPending || batchStatus?.status === 'pending';
 
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
@@ -331,8 +530,6 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                             isSelected ? colors.bgLight : ""
                                         )}
                                         style={{
-                                            '--ring-color': baseColor,
-                                            // @ts-ignore
                                             boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
                                         }}
                                     >
@@ -355,10 +552,10 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                         {/* Amount Input */}
                         <div className="space-y-3">
                             <div className="flex justify-between items-center">
-                                <Label className="text-sm text-muted-foreground">Amount</Label>
+                                <Label className="text-sm text-muted-foreground">Amount (USDC)</Label>
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                     <Wallet className="w-3 h-3" />
-                                    <span>Available: {ethBalance?.value !== undefined ? parseFloat(formatEther(ethBalance.value)).toFixed(4) : '0'} ETH</span>
+                                    <span>Balance: {usdcBalance !== undefined ? parseFloat(formatUSDC(usdcBalance)).toFixed(2) : '0'} USDC</span>
                                 </div>
                             </div>
                             
@@ -392,10 +589,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                         {/* Order Summary */}
                         <div className="space-y-3 pt-0">
                             <Button 
-                                className={cn(
-                                    "w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]",
-                                    "bg-emerald-600 hover:bg-emerald-500 text-white"
-                                )}
+                                className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
                                 onClick={handleBuy} 
                                 disabled={isLoading || !amount}
                             >
@@ -411,23 +605,23 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                     <span>Price per share</span>
                                     <span className="text-foreground">
                                         {outcomePrices[selectedOutcome] > 0 
-                                            ? formatCurrency(outcomePrices[selectedOutcome]) 
+                                            ? `$${outcomePrices[selectedOutcome].toFixed(4)}` 
                                             : '-'}
                                     </span>
                                 </div>
                                 <div className="flex justify-between text-muted-foreground">
                                     <span>Est. Shares</span>
-                                    <span className="text-foreground">{formatShares(Number(formatEther(simulatedBuyShares)))}</span>
+                                    <span className="text-foreground">{formatShares(Number(formatUnits(simulatedBuyShares, 18)))}</span>
                                 </div>
                                 <div className="flex justify-between text-muted-foreground">
                                     <span>Potential Return</span>
                                     <span className="text-emerald-500 font-medium">
                                         {simulatedBuyShares > 0n 
-                                            ? formatCurrency(Number(formatEther(simulatedBuyShares))) // 1 share = 1 ETH payout
+                                            ? `$${Number(formatUnits(simulatedBuyShares, 18)).toFixed(2)}` 
                                             : '$0.00'} 
                                         {' '}
                                         ({amount && Number(amount) > 0 
-                                            ? ((Number(formatEther(simulatedBuyShares)) / Number(amount) - 1) * 100).toFixed(0) 
+                                            ? ((Number(formatUnits(simulatedBuyShares, 18)) / Number(amount) - 1) * 100).toFixed(0) 
                                             : '0'}%)
                                     </span>
                                 </div>
@@ -461,8 +655,6 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                             isSelected ? colors.bgLight : ""
                                         )}
                                         style={{
-                                            '--ring-color': baseColor,
-                                            // @ts-ignore
                                             boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
                                         }}
                                     >
@@ -474,7 +666,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                                 <span className="font-medium truncate">{title}</span>
                                             </div>
                                             <span className="font-mono font-medium ml-2 shrink-0">
-                                                {parseFloat(formatEther(userSharesForOutcome)).toFixed(2)} shares
+                                                {parseFloat(formatUnits(userSharesForOutcome, 18)).toFixed(2)} shares
                                             </span>
                                         </button>
                                     );
@@ -488,19 +680,17 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                 <Label className="text-sm text-muted-foreground">Shares to Sell</Label>
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                     <Wallet className="w-3 h-3" />
-                                    <span>Available: {userSelectedOutcomeShares > 0n ? parseFloat(formatEther(userSelectedOutcomeShares)).toFixed(4) : '0'} shares</span>
+                                    <span>Available: {userSelectedOutcomeShares > 0n ? parseFloat(formatUnits(userSelectedOutcomeShares, 18)).toFixed(4) : '0'} shares</span>
                                 </div>
                             </div>
                             
                             <div className="flex flex-wrap gap-2">
                                 <div className="relative flex-1 min-w-[120px]">
-                                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                                     <Input 
                                         type="number" 
                                         value={sharesToSell} 
                                         onChange={(e) => setSharesToSell(e.target.value)}
                                         placeholder="0.00"
-                                        className="pl-9"
                                     />
                                 </div>
                                 <div className="flex gap-1">
@@ -579,11 +769,11 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <div className="text-xs text-muted-foreground">Liquidity Provided</div>
-                                        <div className="text-lg font-semibold">{parseFloat(formatEther(userLiquidity)).toFixed(4)} LP</div>
+                                        <div className="text-lg font-semibold">{parseFloat(formatUnits(userLiquidity, 18)).toFixed(4)} LP</div>
                                     </div>
                                     <div>
                                         <div className="text-xs text-muted-foreground">Fees Earned</div>
-                                        <div className="text-lg font-semibold text-emerald-500">{parseFloat(formatEther(userClaimableFees)).toFixed(4)} ETH</div>
+                                        <div className="text-lg font-semibold text-emerald-500">{parseFloat(formatUSDC(userClaimableFees)).toFixed(2)} USDC</div>
                                     </div>
                                 </div>
                             </div>
@@ -621,7 +811,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                 <div className="flex justify-between items-center">
                                     <Label className="text-sm text-muted-foreground">Amount (LP)</Label>
                                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                        <span>Available: {parseFloat(formatEther(userLiquidity)).toFixed(4)} LP</span>
+                                        <span>Available: {parseFloat(formatUnits(userLiquidity, 18)).toFixed(4)} LP</span>
                                     </div>
                                 </div>
                                 
@@ -670,10 +860,10 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                         {liquidityTab === "add" && (
                             <div className="space-y-3">
                                 <div className="flex justify-between items-center">
-                                    <Label className="text-sm text-muted-foreground">Amount (ETH)</Label>
+                                    <Label className="text-sm text-muted-foreground">Amount (USDC)</Label>
                                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                         <Wallet className="w-3 h-3" />
-                                        <span>Available: {ethBalance?.value !== undefined ? parseFloat(formatEther(ethBalance.value)).toFixed(4) : '0'} ETH</span>
+                                        <span>Balance: {usdcBalance !== undefined ? parseFloat(formatUSDC(usdcBalance)).toFixed(2) : '0'} USDC</span>
                                     </div>
                                 </div>
                                 
@@ -704,10 +894,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                 </div>
 
                                 <Button 
-                                    className={cn(
-                                        "w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]",
-                                        "bg-blue-600 hover:bg-blue-500 text-white"
-                                    )}
+                                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-blue-600 hover:bg-blue-500 text-white"
                                     onClick={handleAddLiquidity} 
                                     disabled={isLoading || !amount}
                                 >

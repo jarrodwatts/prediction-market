@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuroraBackground } from "@/components/ui/aurora-background";
 import { Header } from "@/components/header";
+import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -45,6 +46,13 @@ export default function RootLayout({
               <Header />
               <main className="flex-1">{children}</main>
             </div>
+            <Toaster 
+              position="bottom-right"
+              expand={false}
+              richColors
+              closeButton
+              duration={5000}
+            />
           </Providers>
         </ThemeProvider>
       </body>

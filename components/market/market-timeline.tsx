@@ -6,7 +6,7 @@
  * Displays a visual timeline of market lifecycle events.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronUp, ChevronDown, CheckCircle, Circle } from "lucide-react";
 import { formatDate } from "@/lib/formatters";
 import type { MarketData } from "@/lib/types";
@@ -24,7 +24,11 @@ interface TimelineEvent {
 }
 
 function getTimelineEvents(market: MarketData): TimelineEvent[] {
-  const closed = market.state >= 1; // 1: Closed, 2: Resolved
+  const now = Date.now();
+  const closesAtMs = market.closesAt ? Number(market.closesAt) * 1000 : 0;
+  
+  // Market is closed if state >= 1 OR if current time is past closesAt
+  const closed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
   const resolved = market.state === 2;
 
   const events: TimelineEvent[] = [
@@ -94,6 +98,20 @@ export function MarketTimeline({
   defaultExpanded = true,
 }: MarketTimelineProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [, forceUpdate] = useState(0);
+  
+  // Auto-update when market closes
+  useEffect(() => {
+    const closesAtMs = market.closesAt ? Number(market.closesAt) * 1000 : 0;
+    const now = Date.now();
+    
+    if (closesAtMs > now) {
+      const timeUntilClose = closesAtMs - now + 1000;
+      const timer = setTimeout(() => forceUpdate(n => n + 1), timeUntilClose);
+      return () => clearTimeout(timer);
+    }
+  }, [market.closesAt]);
+  
   const events = getTimelineEvents(market);
 
   return (

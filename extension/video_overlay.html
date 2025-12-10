@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prediction Market Overlay</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <!-- Twitch Extension Helper -->
+  <script src="https://extension-files.twitch.tv/helper/v1/twitch-ext.min.js"></script>
+  
+  <!-- Main Overlay Container - Initially hidden -->
+  <div id="overlay-container" class="overlay-container hidden">
+    <!-- Minimized State -->
+    <div id="minimized-view" class="minimized-view">
+      <button id="expand-btn" class="expand-btn">
+        <span class="icon">🎯</span>
+        <span class="badge" id="mini-odds">50%</span>
+      </button>
+    </div>
+    
+    <!-- Expanded State -->
+    <div id="expanded-view" class="expanded-view hidden">
+      <!-- Header -->
+      <div class="overlay-header">
+        <span class="icon">🎯</span>
+        <span class="title" id="prediction-title">Loading...</span>
+        <button id="collapse-btn" class="collapse-btn">−</button>
+      </div>
+      
+      <!-- Outcomes -->
+      <div class="outcomes-container">
+        <div id="outcomes-list" class="outcomes-list">
+          <!-- Outcomes will be dynamically inserted here -->
+        </div>
+      </div>
+      
+      <!-- Bet Amounts -->
+      <div class="bet-amounts" id="bet-amounts">
+        <button class="bet-btn" data-amount="1">$1</button>
+        <button class="bet-btn" data-amount="5">$5</button>
+        <button class="bet-btn" data-amount="10">$10</button>
+        <button class="bet-btn" data-amount="25">$25</button>
+      </div>
+      
+      <!-- Footer -->
+      <div class="overlay-footer">
+        <div class="balance-info">
+          <span id="balance-display">💰 --</span>
+        </div>
+        <div class="timer-info">
+          <span id="timer-display">⏱️ --:--</span>
+        </div>
+      </div>
+      
+      <!-- Connect Wallet State -->
+      <div id="connect-state" class="connect-state hidden">
+        <p>Connect wallet to bet</p>
+        <button id="connect-btn" class="connect-btn">Connect Wallet</button>
+      </div>
+      
+      <!-- Loading State -->
+      <div id="loading-state" class="loading-state hidden">
+        <div class="spinner"></div>
+        <p>Processing...</p>
+      </div>
+      
+      <!-- Error State -->
+      <div id="error-state" class="error-state hidden">
+        <p id="error-message">An error occurred</p>
+        <button id="retry-btn" class="retry-btn">Retry</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- No Active Market State -->
+  <div id="no-market" class="no-market hidden">
+    <span class="icon">🎯</span>
+    <span class="text">No active prediction</span>
+  </div>
+  
+  <script src="js/viewer.js"></script>
+</body>
+</html>
+
