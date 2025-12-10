@@ -186,24 +186,67 @@ export async function resolveMarket(
   })
   
   const state = marketData[0] // MarketState: 0=open, 1=closed, 2=resolved
+  const closesAt = marketData[1] // closesAt timestamp
   
   if (state === 2) {
     console.log(`Market ${marketId} is already resolved`)
     return ''
   }
   
-  if (state === 0) {
-    console.log(`⚠️ Market ${marketId} is still open - cannot resolve until it closes`)
+  // Check if market SHOULD be closed (time has passed) even if state hasn't transitioned yet
+  // The contract's transitionLast modifier will handle the state transition when we call it
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  if (state === 0 && now < closesAt) {
+    console.log(`⚠️ Market ${marketId} is still open (closes at ${new Date(Number(closesAt) * 1000).toISOString()})`)
+    console.log(`   Current time: ${new Date(Number(now) * 1000).toISOString()}`)
     console.log(`   The market will need to be resolved manually after it closes`)
     return ''
   }
   
-  // Market is closed, we can resolve it
+  // Either market is closed OR time has passed (contract will auto-transition)
+  console.log(`📝 Calling creatorResolveMarketOutcome for market ${marketId} with outcome ${outcomeId}`)
+  
   const txHash = await walletClient.writeContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
     functionName: 'creatorResolveMarketOutcome',
     args: [marketId, BigInt(outcomeId)],
+  })
+  
+  await publicClient.waitForTransactionReceipt({ hash: txHash })
+  
+  return txHash
+}
+
+/**
+ * Lock a market early (stop trading before closesAt time)
+ * Called when Twitch prediction is locked
+ */
+export async function lockMarket(marketId: bigint): Promise<string> {
+  const { walletClient, publicClient } = getBackendWallet()
+  
+  // Check market state first
+  const marketData = await publicClient.readContract({
+    address: PREDICTION_MARKET_ADDRESS,
+    abi: PREDICTION_MARKET_ABI,
+    functionName: 'getMarketData',
+    args: [marketId],
+  })
+  
+  const state = marketData[0] // MarketState: 0=open, 1=closed, 2=resolved
+  
+  if (state !== 0) {
+    console.log(`Market ${marketId} is not open (state: ${state}), skipping lock`)
+    return ''
+  }
+  
+  console.log(`🔒 Locking market ${marketId}`)
+  
+  const txHash = await walletClient.writeContract({
+    address: PREDICTION_MARKET_ADDRESS,
+    abi: PREDICTION_MARKET_ABI,
+    functionName: 'creatorLockMarket',
+    args: [marketId],
   })
   
   await publicClient.waitForTransactionReceipt({ hash: txHash })
@@ -226,23 +269,26 @@ export async function voidMarket(marketId: bigint): Promise<string> {
   })
   
   const state = marketData[0] // MarketState: 0=open, 1=closed, 2=resolved
+  const closesAt = marketData[1] // closesAt timestamp
   
   if (state === 2) {
     console.log(`Market ${marketId} is already resolved, skipping void`)
     return ''
   }
   
-  if (state === 0) {
-    // Market is still open - can't resolve yet
-    // This happens when a Twitch prediction is canceled before its time window ends
-    console.log(`⚠️ Market ${marketId} is still open - cannot void until it closes`)
+  // Check if market SHOULD be closed (time has passed) even if state hasn't transitioned yet
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  if (state === 0 && now < closesAt) {
+    console.log(`⚠️ Market ${marketId} is still open (closes at ${new Date(Number(closesAt) * 1000).toISOString()})`)
+    console.log(`   Current time: ${new Date(Number(now) * 1000).toISOString()}`)
     console.log(`   The market will need to be voided manually after it closes`)
     return ''
   }
   
-  // Market is closed, we can void it
+  // Either market is closed OR time has passed (contract will auto-transition)
   // Resolve with an outcomeId that doesn't exist to void the market
   // The contract uses MAX_UINT_256 for voided markets
+  console.log(`📝 Voiding market ${marketId}`)
   const voidOutcomeId = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
   
   const txHash = await walletClient.writeContract({

@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, DollarSign, Wallet, Droplets, Coins, ArrowDownToLine } from "lucide-react";
+import { Loader2, DollarSign, Wallet, Droplets, Coins, ArrowDownToLine, Lock } from "lucide-react";
 import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useSendCalls, useCallsStatus } from "wagmi";
 import { useQueryClient } from "@tanstack/react-query";
 import { parseUnits, formatUnits, encodeFunctionData } from "viem";
@@ -91,7 +91,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   const [sharesToSell, setSharesToSell] = useState("");
   const [liquidityToRemove, setLiquidityToRemove] = useState("");
   const [needsApproval, setNeedsApproval] = useState(false);
-  const [pendingTxType, setPendingTxType] = useState<"buy" | "sell" | "addLiquidity" | "removeLiquidity" | "claimFees" | "claimLiquidity" | "approve" | null>(null);
+  const [pendingTxType, setPendingTxType] = useState<"buy" | "sell" | "addLiquidity" | "removeLiquidity" | "claimFees" | "claimLiquidity" | "claimWinnings" | "approve" | null>(null);
   
   const txToast = useTransactionToast();
   const handledHashRef = useRef<string | null>(null);
@@ -106,9 +106,20 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   const batchId = typeof batchCallsData === 'string' ? batchCallsData : batchCallsData?.id;
   const { data: batchStatus } = useCallsStatus({
     id: batchId!,
-    query: { enabled: !!batchId },
+    query: { 
+      enabled: !!batchId,
+      // Poll every second until the transaction is confirmed or fails
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        if (status === 'success' || status === 'failure') {
+          return false; // Stop polling
+        }
+        return 1000; // Poll every 1 second
+      },
+    },
   });
   const isBatchSuccess = batchStatus?.status === 'success';
+  const isBatchFailed = batchStatus?.status === 'failure';
 
   // USDC Balance
   const { data: usdcBalance, refetch: refetchBalance } = useReadContract({
@@ -266,18 +277,41 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
       }
   }, [batchError, pendingTxType, txToast]);
 
+  // Track batch failures we've already handled
+  const handledBatchFailureRef = useRef<string | null>(null);
+  
+  // Effect to handle batched transaction failure (from status polling)
+  useEffect(() => {
+    if (isBatchFailed && batchId && batchId !== handledBatchFailureRef.current) {
+        handledBatchFailureRef.current = batchId;
+        if (pendingTxType) {
+          txToast.showError(pendingTxType, "Transaction failed on chain");
+          setPendingTxType(null);
+        }
+    }
+  }, [isBatchFailed, batchId, pendingTxType, txToast]);
+
   const outcomeShares = shares ? shares[1] : [];
   const buyFee = fees ? (fees[0].fee + fees[0].treasuryFee + fees[0].distributorFee) : 0n;
   const sellFee = fees ? (fees[1].fee + fees[1].treasuryFee + fees[1].distributorFee) : 0n;
   const liquidity = shares ? shares[0] : 0n;
   
   // User's shares for each outcome
-  const userOutcomeShares = userShares ? userShares[1] : [];
+  // userShares returns: { liquidity: bigint, outcomes: bigint[] } or [bigint, bigint[]]
+  const userOutcomeShares = userShares 
+    ? (Array.isArray(userShares[1]) ? userShares[1] : []) 
+    : [];
   const userSelectedOutcomeShares = userOutcomeShares[selectedOutcome] ?? 0n;
   
   // User's liquidity position
-  const userLiquidity = userShares ? userShares[0] : 0n;
+  const userLiquidity = userShares ? (userShares[0] ?? 0n) : 0n;
   const userClaimableFees = claimableFees ?? 0n;
+
+  // Simple helpers for closed-panel layout
+  const yesShares = userOutcomeShares[0] ?? 0n;
+  const noShares = userOutcomeShares[1] ?? 0n;
+  const hasYesPosition = yesShares > 0n;
+  const hasNoPosition = noShares > 0n;
   
   // Claim status flags
   const canClaimLiquidity = claimStatus ? claimStatus[2] && !claimStatus[3] : false;
@@ -510,7 +544,185 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
     }
   };
 
-  const isLoading = isWritePending || isConfirming || isBatchPending || batchStatus?.status === 'pending';
+  const isBatchConfirming = !!batchId && batchStatus?.status === 'pending';
+  const isLoading = isWritePending || isConfirming || isBatchPending || isBatchConfirming;
+
+  // Market Status
+  const now = Date.now();
+  const closesAtMs = Number(market.closesAt) * 1000;
+  const isClosed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
+  const isResolved = market.state === 2;
+  
+  const resolvedOutcomeId = Number(market.resolvedOutcomeId);
+  const hasWinningShares = isResolved && userOutcomeShares[resolvedOutcomeId] > 0n;
+  const winningOutcomeName = isResolved ? (resolvedOutcomeId === 0 ? "Yes" : "No") : "";
+
+  const handleClaimWinnings = () => {
+    setPendingTxType("claimWinnings");
+    txToast.showPending("claimWinnings");
+    
+    try {
+        writeContract({
+            address: PREDICTION_MARKET_ADDRESS,
+            abi: PREDICTION_MARKET_ABI,
+            functionName: 'claimWinnings',
+            args: [market.id]
+        });
+    } catch (e: any) {
+        txToast.showError("claimWinnings", e.message);
+        setPendingTxType(null);
+    }
+  };
+
+  if (isClosed || isResolved) {
+    return (
+        <div className="border border-border rounded-xl bg-card overflow-hidden">
+            {/* Status Header - matches tab header style */}
+            <div className="border-b border-border bg-transparent p-4">
+                <div className="flex items-center gap-2">
+                    {isResolved ? (
+                        <Coins className="w-4 h-4 text-yellow-500" />
+                    ) : (
+                        <Lock className="w-4 h-4 text-muted-foreground" />
+                    )}
+                    <span className="font-medium">
+                        {isResolved ? "Market Resolved" : "Market Closed"}
+                    </span>
+                    {isResolved && (
+                        <span className={cn(
+                            "ml-auto text-sm font-semibold", 
+                            resolvedOutcomeId === 0 ? "text-emerald-500" : "text-red-500"
+                        )}>
+                            {winningOutcomeName} wins
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            <div className="p-4 sm:p-6 w-full">
+                <div className="space-y-3">
+                    {/* Status message */}
+                    <p className="text-sm text-muted-foreground">
+                        {isResolved 
+                            ? "This market has been finalized." 
+                            : "Prediction period closed, awaiting final outcome."}
+                    </p>
+
+                    {/* User Position Summary */}
+                    {(userLiquidity > 0n || userClaimableFees > 0n || userOutcomeShares.some(s => s > 0n)) && (
+                        <>
+                            <div className="rounded-lg border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                        Your positions
+                                    </span>
+                                </div>
+                                
+                                {/* Yes/No Shares cards */}
+                                {(hasYesPosition || hasNoPosition) && (
+                                    <div className={cn(
+                                        "gap-2",
+                                        hasYesPosition && hasNoPosition ? "grid grid-cols-2" : "grid grid-cols-1"
+                                    )}>
+                                        {hasYesPosition && (
+                                            <div className="relative overflow-hidden rounded-lg border border-emerald-500/25 px-3 py-2.5 bg-linear-to-br from-emerald-500/8 via-transparent to-emerald-500/15">
+                                                <div className="absolute inset-0 bg-linear-to-t from-emerald-500/10 to-transparent opacity-60" />
+                                                <div className="relative flex items-center justify-between">
+                                                    <span className="text-xs text-muted-foreground">Yes</span>
+                                                    <span className="text-base font-mono font-semibold text-emerald-500">
+                                                        ${parseFloat(formatUnits(yesShares, USDC_DECIMALS)).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {hasNoPosition && (
+                                            <div className="relative overflow-hidden rounded-lg border border-red-500/25 px-3 py-2.5 bg-linear-to-br from-red-500/8 via-transparent to-red-500/15">
+                                                <div className="absolute inset-0 bg-linear-to-t from-red-500/10 to-transparent opacity-60" />
+                                                <div className="relative flex items-center justify-between">
+                                                    <span className="text-xs text-muted-foreground">No</span>
+                                                    <span className="text-base font-mono font-semibold text-red-500">
+                                                        ${parseFloat(formatUnits(noShares, USDC_DECIMALS)).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Liquidity & Fees */}
+                                {(userLiquidity > 0n || userClaimableFees > 0n) && (
+                                    <div className="space-y-1.5 text-xs sm:text-sm">
+                                        {userLiquidity > 0n && (
+                                            <div className="flex justify-between text-muted-foreground">
+                                                <span>Liquidity</span>
+                                                <span className="text-foreground font-mono">
+                                                    ${parseFloat(formatUnits(userLiquidity, USDC_DECIMALS)).toFixed(2)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {userClaimableFees > 0n && (
+                                            <div className="flex justify-between text-muted-foreground">
+                                                <span>Fees earned</span>
+                                                <span className="text-emerald-500 font-mono">
+                                                    ${parseFloat(formatUSDC(userClaimableFees)).toFixed(2)}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Actions */}
+                            <div className="space-y-2">
+                                {hasWinningShares && (
+                                    <Button 
+                                        onClick={handleClaimWinnings}
+                                        disabled={isLoading}
+                                        className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
+                                    >
+                                        {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
+                                        Claim Winnings
+                                    </Button>
+                                )}
+                                
+                                {userClaimableFees > 0n && (
+                                    <Button 
+                                        variant="outline"
+                                        onClick={handleClaimFees}
+                                        disabled={isLoading}
+                                        className="w-full"
+                                    >
+                                        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Coins className="mr-2 h-4 w-4" />}
+                                        Claim Fees
+                                    </Button>
+                                )}
+                                
+                                {isResolved && userLiquidity > 0n && (
+                                    <Button 
+                                        variant="outline"
+                                        onClick={handleClaimLiquidity}
+                                        disabled={isLoading}
+                                        className="w-full"
+                                    >
+                                        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowDownToLine className="mr-2 h-4 w-4" />}
+                                        Claim Liquidity
+                                    </Button>
+                                )}
+                            </div>
+                        </>
+                    )}
+
+                    {/* No position message */}
+                    {!(userLiquidity > 0n || userClaimableFees > 0n || userOutcomeShares.some(s => s > 0n)) && (
+                        <div className="p-3 bg-muted/30 rounded-lg text-xs text-muted-foreground border border-border/50">
+                            <p>You have no active position in this market.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+  }
 
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
@@ -603,7 +815,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                             variant="outline" 
                                             size="sm"
                                             onClick={() => handlePercentageClick(pct)}
-                                            className="px-2 min-w-[3rem]"
+                                            className="px-2 min-w-12"
                                         >
                                             {pct * 100}%
                                         </Button>
@@ -726,7 +938,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                             variant="outline" 
                                             size="sm"
                                             onClick={() => handleSellPercentageClick(pct)}
-                                            className="px-2 min-w-[3rem]"
+                                            className="px-2 min-w-12"
                                         >
                                             {pct * 100}%
                                         </Button>
@@ -759,7 +971,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                     <div className="space-y-4">
                         {/* User's Position Summary */}
                         {isConnected && (userLiquidity > 0n || userClaimableFees > 0n) && (
-                            <div className="p-4 bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20">
+                            <div className="p-4 bg-linear-to-br from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20">
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-2">
                                         <Droplets className="w-4 h-4 text-blue-400" />
@@ -857,7 +1069,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                                 variant="outline" 
                                                 size="sm"
                                                 onClick={() => handleLiquidityPercentageClick(pct)}
-                                                className="px-2 min-w-[3rem]"
+                                                className="px-2 min-w-12"
                                             >
                                                 {pct * 100}%
                                             </Button>
@@ -911,7 +1123,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                                                 variant="outline" 
                                                 size="sm"
                                                 onClick={() => handlePercentageClick(pct)}
-                                                className="px-2 min-w-[3rem]"
+                                                className="px-2 min-w-12"
                                             >
                                                 {pct * 100}%
                                             </Button>

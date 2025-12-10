@@ -84,6 +84,8 @@ contract PredictionMarket is ReentrancyGuard, Ownable {
 
   event MarketPaused(address indexed user, uint256 indexed marketId, bool paused, uint256 timestamp);
 
+  event MarketLocked(address indexed user, uint256 indexed marketId, uint256 timestamp);
+
   event MarketCloseDateEdited(
     address indexed user,
     uint256 indexed marketId,
@@ -916,6 +918,25 @@ contract PredictionMarket is ReentrancyGuard, Ownable {
     _emitMarketActionEvents(marketId);
 
     return market.resolution.outcomeId;
+  }
+
+  /// @dev Locks a market early (creator only) - stops trading before closesAt time
+  /// @notice This allows syncing with external systems (like Twitch) that can lock predictions early
+  function creatorLockMarket(uint256 marketId)
+    external
+    isMarket(marketId)
+    atState(marketId, MarketState.open)
+    nonReentrant
+  {
+    Market storage market = markets[marketId];
+
+    require(msg.sender == market.creator, "Only creator can lock");
+
+    // Transition to closed state
+    market.state = MarketState.closed;
+
+    emit MarketLocked(msg.sender, marketId, block.timestamp);
+    _emitMarketActionEvents(marketId);
   }
 
   /// @dev pauses a market, no trading allowed

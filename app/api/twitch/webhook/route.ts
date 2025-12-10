@@ -14,7 +14,7 @@ import {
   clearActivePrediction,
   getStreamerSession,
 } from '@/lib/kv'
-import { createMarketWithLiquidity, resolveMarket, voidMarket } from '@/lib/liquidity'
+import { createMarketWithLiquidity, resolveMarket, voidMarket, lockMarket } from '@/lib/liquidity'
 
 // Protocol treasury address (update with actual address)
 const PROTOCOL_TREASURY = process.env.PROTOCOL_TREASURY_ADDRESS || '0x0000000000000000000000000000000000000000'
@@ -294,12 +294,29 @@ async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
 }
 
 /**
- * Handle prediction.lock - Market should already be closed by closesAt time
+ * Handle prediction.lock - Lock the market early (stop trading)
  */
 async function handlePredictionLock(event: TwitchPredictionLockEvent) {
   console.log(`🔒 Prediction locked: ${event.title}`)
-  // The market should already be closed based on the closesAt timestamp
-  // This is mainly for logging/tracking purposes
+  
+  const predictionData = await getPredictionData(event.id)
+  
+  if (!predictionData) {
+    console.log(`⚠️ No market found for prediction ${event.id}`)
+    return
+  }
+  
+  try {
+    const txHash = await lockMarket(predictionData.marketId)
+    
+    if (txHash) {
+      console.log(`✅ Market ${predictionData.marketId} locked on-chain (tx: ${txHash})`)
+    } else {
+      console.log(`⏭️ Market ${predictionData.marketId} was already locked or not open`)
+    }
+  } catch (error) {
+    console.error('❌ Error locking market:', error)
+  }
 }
 
 /**
@@ -316,28 +333,32 @@ async function handlePredictionEnd(event: TwitchPredictionEndEvent) {
   }
   
   try {
+    let txHash: string = ''
+    
     if (event.status === 'canceled' || !event.winning_outcome_id) {
       // Prediction was canceled - void the market
       console.log(`🚫 Voiding market ${predictionData.marketId}`)
-      await voidMarket(predictionData.marketId)
+      txHash = await voidMarket(predictionData.marketId)
     } else {
       // Prediction resolved - find the winning outcome index
       const winningIndex = predictionData.outcomeMap[event.winning_outcome_id]
       
       if (winningIndex === undefined) {
         console.error(`Winning outcome ${event.winning_outcome_id} not found in outcome map`)
-        await voidMarket(predictionData.marketId)
-        return
+        txHash = await voidMarket(predictionData.marketId)
+      } else {
+        console.log(`🏆 Resolving market ${predictionData.marketId} with outcome ${winningIndex}`)
+        txHash = await resolveMarket(predictionData.marketId, winningIndex)
       }
-      
-      console.log(`🏆 Resolving market ${predictionData.marketId} with outcome ${winningIndex}`)
-      await resolveMarket(predictionData.marketId, winningIndex)
     }
     
-    // Clear the active prediction for this channel
-    await clearActivePrediction(predictionData.channelId)
-    
-    console.log(`✅ Market ${predictionData.marketId} resolved successfully`)
+    if (txHash) {
+      console.log(`✅ Market ${predictionData.marketId} resolved on-chain (tx: ${txHash})`)
+      // Clear the active prediction for this channel
+      await clearActivePrediction(predictionData.channelId)
+    } else {
+      console.log(`⏳ Market ${predictionData.marketId} could not be resolved yet - will need manual resolution`)
+    }
   } catch (error) {
     console.error('❌ Error resolving market:', error)
   }

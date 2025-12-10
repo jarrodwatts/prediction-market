@@ -1,1170 +1,2118 @@
 export const PREDICTION_MARKET_ABI = [
   {
-    type: "constructor",
-    inputs: [
-      { name: "_WETH", type: "address", internalType: "contract IWETH" },
-    ],
-    stateMutability: "nonpayable",
-  },
-  { type: "receive", stateMutability: "payable" },
-  {
-    type: "function",
-    name: "MAX_FEE",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "MAX_OUTCOMES",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "WETH",
-    inputs: [],
-    outputs: [{ name: "", type: "address", internalType: "contract IWETH" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "addLiquidity",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "value", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "addLiquidityWithETH",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "payable",
-  },
-  {
-    type: "function",
-    name: "adminPauseMarket",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "adminResolveMarketOutcome",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "creatorResolveMarketOutcome",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "adminSetMarketCloseDate",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "closesAt", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "adminUnpauseMarket",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "buy",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
+    "type": "constructor",
+    "inputs": [
       {
-        name: "minOutcomeSharesToBuy",
-        type: "uint256",
-        internalType: "uint256",
+        "name": "_WETH",
+        "type": "address",
+        "internalType": "contract IWETH"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "MAX_FEE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_OUTCOMES",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "WETH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IWETH"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "addLiquidity",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
       },
-      { name: "value", type: "uint256", internalType: "uint256" },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    outputs: [],
-    stateMutability: "nonpayable",
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
-    type: "function",
-    name: "buyWithETH",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
+    "type": "function",
+    "name": "addLiquidityWithETH",
+    "inputs": [
       {
-        name: "minOutcomeSharesToBuy",
-        type: "uint256",
-        internalType: "uint256",
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "adminPauseMarket",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "adminResolveMarketOutcome",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
       },
-    ],
-    outputs: [],
-    stateMutability: "payable",
-  },
-  {
-    type: "function",
-    name: "calcBuyAmount",
-    inputs: [
-      { name: "amount", type: "uint256", internalType: "uint256" },
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "calcSellAmount",
-    inputs: [
-      { name: "amount", type: "uint256", internalType: "uint256" },
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [
       {
-        name: "outcomeTokenSellAmount",
-        type: "uint256",
-        internalType: "uint256",
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "adminSetMarketCloseDate",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
       },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "claimFees",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "claimFeesToETH",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "claimLiquidity",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "claimLiquidityToETH",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "claimVoidedOutcomeShares",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "claimVoidedOutcomeSharesToETH",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "claimWinnings",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "claimWinningsToETH",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "createMarket",
-    inputs: [
       {
-        name: "desc",
-        type: "tuple",
-        internalType: "struct PredictionMarket.CreateMarketDescription",
-        components: [
-          { name: "value", type: "uint256", internalType: "uint256" },
-          { name: "closesAt", type: "uint32", internalType: "uint32" },
-          { name: "outcomes", type: "uint256", internalType: "uint256" },
-          { name: "token", type: "address", internalType: "contract IERC20" },
+        "name": "closesAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "adminUnpauseMarket",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "buy",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minOutcomeSharesToBuy",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "buyWithETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minOutcomeSharesToBuy",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "calcBuyAmount",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "calcSellAmount",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "outcomeTokenSellAmount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "claimFees",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimFeesToETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimLiquidity",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimLiquidityToETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimVoidedOutcomeShares",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimVoidedOutcomeSharesToETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimWinnings",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimWinningsToETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "createMarket",
+    "inputs": [
+      {
+        "name": "desc",
+        "type": "tuple",
+        "internalType": "struct PredictionMarket.CreateMarketDescription",
+        "components": [
           {
-            name: "distribution",
-            type: "uint256[]",
-            internalType: "uint256[]",
+            "name": "value",
+            "type": "uint256",
+            "internalType": "uint256"
           },
-          { name: "question", type: "string", internalType: "string" },
-          { name: "image", type: "string", internalType: "string" },
           {
-            name: "buyFees",
-            type: "tuple",
-            internalType: "struct PredictionMarket.Fees",
-            components: [
-              { name: "fee", type: "uint256", internalType: "uint256" },
-              { name: "treasuryFee", type: "uint256", internalType: "uint256" },
+            "name": "closesAt",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "outcomes",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "contract IERC20"
+          },
+          {
+            "name": "distribution",
+            "type": "uint256[]",
+            "internalType": "uint256[]"
+          },
+          {
+            "name": "question",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "image",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "buyFees",
+            "type": "tuple",
+            "internalType": "struct PredictionMarket.Fees",
+            "components": [
               {
-                name: "distributorFee",
-                type: "uint256",
-                internalType: "uint256",
+                "name": "fee",
+                "type": "uint256",
+                "internalType": "uint256"
               },
-            ],
-          },
-          {
-            name: "sellFees",
-            type: "tuple",
-            internalType: "struct PredictionMarket.Fees",
-            components: [
-              { name: "fee", type: "uint256", internalType: "uint256" },
-              { name: "treasuryFee", type: "uint256", internalType: "uint256" },
               {
-                name: "distributorFee",
-                type: "uint256",
-                internalType: "uint256",
+                "name": "treasuryFee",
+                "type": "uint256",
+                "internalType": "uint256"
               },
-            ],
-          },
-          { name: "treasury", type: "address", internalType: "address" },
-          { name: "distributor", type: "address", internalType: "address" },
-        ],
-      },
-    ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "createMarketWithETH",
-    inputs: [
-      {
-        name: "desc",
-        type: "tuple",
-        internalType: "struct PredictionMarket.CreateMarketDescription",
-        components: [
-          { name: "value", type: "uint256", internalType: "uint256" },
-          { name: "closesAt", type: "uint32", internalType: "uint32" },
-          { name: "outcomes", type: "uint256", internalType: "uint256" },
-          { name: "token", type: "address", internalType: "contract IERC20" },
-          {
-            name: "distribution",
-            type: "uint256[]",
-            internalType: "uint256[]",
-          },
-          { name: "question", type: "string", internalType: "string" },
-          { name: "image", type: "string", internalType: "string" },
-          {
-            name: "buyFees",
-            type: "tuple",
-            internalType: "struct PredictionMarket.Fees",
-            components: [
-              { name: "fee", type: "uint256", internalType: "uint256" },
-              { name: "treasuryFee", type: "uint256", internalType: "uint256" },
               {
-                name: "distributorFee",
-                type: "uint256",
-                internalType: "uint256",
-              },
-            ],
+                "name": "distributorFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
           },
           {
-            name: "sellFees",
-            type: "tuple",
-            internalType: "struct PredictionMarket.Fees",
-            components: [
-              { name: "fee", type: "uint256", internalType: "uint256" },
-              { name: "treasuryFee", type: "uint256", internalType: "uint256" },
+            "name": "sellFees",
+            "type": "tuple",
+            "internalType": "struct PredictionMarket.Fees",
+            "components": [
               {
-                name: "distributorFee",
-                type: "uint256",
-                internalType: "uint256",
+                "name": "fee",
+                "type": "uint256",
+                "internalType": "uint256"
               },
-            ],
-          },
-          { name: "treasury", type: "address", internalType: "address" },
-          { name: "distributor", type: "address", internalType: "address" },
-        ],
-      },
-    ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "payable",
-  },
-  {
-    type: "function",
-    name: "getMarketAltData",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [
-      { name: "buyFee", type: "uint256", internalType: "uint256" },
-      { name: "questionId", type: "bytes32", internalType: "bytes32" },
-      { name: "questionIdUint", type: "uint256", internalType: "uint256" },
-      { name: "token", type: "address", internalType: "address" },
-      { name: "buyTreasuryFee", type: "uint256", internalType: "uint256" },
-      { name: "treasury", type: "address", internalType: "address" },
-      { name: "realitio", type: "address", internalType: "address" },
-      { name: "realitioTimeout", type: "uint256", internalType: "uint256" },
-      { name: "manager", type: "address", internalType: "address" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketBuyFee",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketCreator",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketData",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [
-      {
-        name: "state",
-        type: "uint8",
-        internalType: "enum PredictionMarket.MarketState",
-      },
-      { name: "closesAt", type: "uint256", internalType: "uint256" },
-      { name: "liquidity", type: "uint256", internalType: "uint256" },
-      { name: "balance", type: "uint256", internalType: "uint256" },
-      { name: "sharesAvailable", type: "uint256", internalType: "uint256" },
-      { name: "resolvedOutcomeId", type: "int256", internalType: "int256" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketFee",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketFees",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [
-      {
-        name: "buyFees",
-        type: "tuple",
-        internalType: "struct PredictionMarket.Fees",
-        components: [
-          { name: "fee", type: "uint256", internalType: "uint256" },
-          { name: "treasuryFee", type: "uint256", internalType: "uint256" },
-          { name: "distributorFee", type: "uint256", internalType: "uint256" },
-        ],
-      },
-      {
-        name: "sellFees",
-        type: "tuple",
-        internalType: "struct PredictionMarket.Fees",
-        components: [
-          { name: "fee", type: "uint256", internalType: "uint256" },
-          { name: "treasuryFee", type: "uint256", internalType: "uint256" },
-          { name: "distributorFee", type: "uint256", internalType: "uint256" },
-        ],
-      },
-      { name: "treasury", type: "address", internalType: "address" },
-      { name: "distributor", type: "address", internalType: "address" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketLiquidityPrice",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketOutcomeData",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [
-      { name: "price", type: "uint256", internalType: "uint256" },
-      { name: "availableShares", type: "uint256", internalType: "uint256" },
-      { name: "totalShares", type: "uint256", internalType: "uint256" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketOutcomeIds",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "uint256[]", internalType: "uint256[]" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketOutcomePrice",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketOutcomesShares",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "uint256[]", internalType: "uint256[]" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketPaused",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketPrices",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [
-      { name: "liquidity", type: "uint256", internalType: "uint256" },
-      { name: "outcomes", type: "uint256[]", internalType: "uint256[]" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketResolvedOutcome",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "int256", internalType: "int256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketSellFee",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarketShares",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [
-      { name: "liquidity", type: "uint256", internalType: "uint256" },
-      { name: "outcomes", type: "uint256[]", internalType: "uint256[]" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getMarkets",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256[]", internalType: "uint256[]" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getUserClaimStatus",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "user", type: "address", internalType: "address" },
-    ],
-    outputs: [
-      { name: "winningsToClaim", type: "bool", internalType: "bool" },
-      { name: "winningsClaimed", type: "bool", internalType: "bool" },
-      { name: "liquidityToClaim", type: "bool", internalType: "bool" },
-      { name: "liquidityClaimed", type: "bool", internalType: "bool" },
-      { name: "claimableFees", type: "uint256", internalType: "uint256" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getUserClaimableFees",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "user", type: "address", internalType: "address" },
-    ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getUserLiquidityPoolShare",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "user", type: "address", internalType: "address" },
-    ],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "getUserMarketShares",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "user", type: "address", internalType: "address" },
-    ],
-    outputs: [
-      { name: "liquidity", type: "uint256", internalType: "uint256" },
-      { name: "outcomes", type: "uint256[]", internalType: "uint256[]" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "isMarketVoided",
-    inputs: [{ name: "marketId", type: "uint256", internalType: "uint256" }],
-    outputs: [{ name: "", type: "bool", internalType: "bool" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "marketIndex",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "owner",
-    inputs: [],
-    outputs: [{ name: "", type: "address", internalType: "address" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "referralBuy",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-      {
-        name: "minOutcomeSharesToBuy",
-        type: "uint256",
-        internalType: "uint256",
-      },
-      { name: "value", type: "uint256", internalType: "uint256" },
-      { name: "code", type: "string", internalType: "string" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "referralBuyWithETH",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-      {
-        name: "minOutcomeSharesToBuy",
-        type: "uint256",
-        internalType: "uint256",
-      },
-      { name: "code", type: "string", internalType: "string" },
-    ],
-    outputs: [],
-    stateMutability: "payable",
-  },
-  {
-    type: "function",
-    name: "referralSell",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-      { name: "value", type: "uint256", internalType: "uint256" },
-      {
-        name: "maxOutcomeSharesToSell",
-        type: "uint256",
-        internalType: "uint256",
-      },
-      { name: "code", type: "string", internalType: "string" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "referralSellToETH",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-      { name: "value", type: "uint256", internalType: "uint256" },
-      {
-        name: "maxOutcomeSharesToSell",
-        type: "uint256",
-        internalType: "uint256",
-      },
-      { name: "code", type: "string", internalType: "string" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "removeLiquidity",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "shares", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "removeLiquidityToETH",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "shares", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "renounceOwnership",
-    inputs: [],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "sell",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-      { name: "value", type: "uint256", internalType: "uint256" },
-      {
-        name: "maxOutcomeSharesToSell",
-        type: "uint256",
-        internalType: "uint256",
-      },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "sellToETH",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
-      { name: "value", type: "uint256", internalType: "uint256" },
-      {
-        name: "maxOutcomeSharesToSell",
-        type: "uint256",
-        internalType: "uint256",
-      },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "transferOwnership",
-    inputs: [{ name: "newOwner", type: "address", internalType: "address" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "updateMarket",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      {
-        name: "update",
-        type: "tuple",
-        internalType: "struct PredictionMarket.MarketUpdateDescription",
-        components: [
-          {
-            name: "closesAtTimestamp",
-            type: "uint256",
-            internalType: "uint256",
-          },
-          { name: "balance", type: "uint256", internalType: "uint256" },
-          { name: "liquidity", type: "uint256", internalType: "uint256" },
-          { name: "sharesAvailable", type: "uint256", internalType: "uint256" },
-          {
-            name: "state",
-            type: "uint8",
-            internalType: "enum PredictionMarket.MarketState",
-          },
-          {
-            name: "resolvedOutcomeId",
-            type: "uint256",
-            internalType: "uint256",
-          },
-          { name: "feesPoolWeight", type: "uint256", internalType: "uint256" },
-          { name: "feesTreasury", type: "address", internalType: "address" },
-          { name: "feesDistributor", type: "address", internalType: "address" },
-          {
-            name: "buyFees",
-            type: "tuple",
-            internalType: "struct PredictionMarket.Fees",
-            components: [
-              { name: "fee", type: "uint256", internalType: "uint256" },
-              { name: "treasuryFee", type: "uint256", internalType: "uint256" },
               {
-                name: "distributorFee",
-                type: "uint256",
-                internalType: "uint256",
+                "name": "treasuryFee",
+                "type": "uint256",
+                "internalType": "uint256"
               },
-            ],
+              {
+                "name": "distributorFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
           },
           {
-            name: "sellFees",
-            type: "tuple",
-            internalType: "struct PredictionMarket.Fees",
-            components: [
-              { name: "fee", type: "uint256", internalType: "uint256" },
-              { name: "treasuryFee", type: "uint256", internalType: "uint256" },
-              {
-                name: "distributorFee",
-                type: "uint256",
-                internalType: "uint256",
-              },
-            ],
+            "name": "treasury",
+            "type": "address",
+            "internalType": "address"
           },
-          { name: "outcomeCount", type: "uint256", internalType: "uint256" },
-          { name: "token", type: "address", internalType: "contract IERC20" },
-          { name: "creator", type: "address", internalType: "address" },
-          { name: "paused", type: "bool", internalType: "bool" },
-        ],
-      },
+          {
+            "name": "distributor",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
     ],
-    outputs: [],
-    stateMutability: "nonpayable",
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
   },
   {
-    type: "function",
-    name: "updateMarketFeesHolders",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
+    "type": "function",
+    "name": "createMarketWithETH",
+    "inputs": [
       {
-        name: "updates",
-        type: "tuple[]",
-        internalType:
-          "struct PredictionMarket.MarketFeesHolderUpdateDescription[]",
-        components: [
-          { name: "holder", type: "address", internalType: "address" },
-          { name: "amount", type: "uint256", internalType: "uint256" },
-        ],
-      },
+        "name": "desc",
+        "type": "tuple",
+        "internalType": "struct PredictionMarket.CreateMarketDescription",
+        "components": [
+          {
+            "name": "value",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "closesAt",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "outcomes",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "contract IERC20"
+          },
+          {
+            "name": "distribution",
+            "type": "uint256[]",
+            "internalType": "uint256[]"
+          },
+          {
+            "name": "question",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "image",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "buyFees",
+            "type": "tuple",
+            "internalType": "struct PredictionMarket.Fees",
+            "components": [
+              {
+                "name": "fee",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "treasuryFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "distributorFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "sellFees",
+            "type": "tuple",
+            "internalType": "struct PredictionMarket.Fees",
+            "components": [
+              {
+                "name": "fee",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "treasuryFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "distributorFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "treasury",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "distributor",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
     ],
-    outputs: [],
-    stateMutability: "nonpayable",
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
   },
   {
-    type: "function",
-    name: "updateMarketLiquidityHolders",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
+    "type": "function",
+    "name": "getMarketAltData",
+    "inputs": [
       {
-        name: "updates",
-        type: "tuple[]",
-        internalType:
-          "struct PredictionMarket.MarketLiquidityHolderUpdateDescription[]",
-        components: [
-          { name: "holder", type: "address", internalType: "address" },
-          { name: "amount", type: "uint256", internalType: "uint256" },
-          { name: "claim", type: "bool", internalType: "bool" },
-        ],
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    outputs: [],
-    stateMutability: "nonpayable",
+    "outputs": [
+      {
+        "name": "buyFee",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "questionId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "questionIdUint",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "buyTreasuryFee",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "treasury",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "realitio",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "realitioTimeout",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "manager",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "function",
-    name: "updateMarketOutcome",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
+    "type": "function",
+    "name": "getMarketBuyFee",
+    "inputs": [
       {
-        name: "update",
-        type: "tuple",
-        internalType: "struct PredictionMarket.MarketOutcomeUpdateDescription",
-        components: [
-          { name: "id", type: "uint256", internalType: "uint256" },
-          { name: "marketId", type: "uint256", internalType: "uint256" },
-          { name: "sharesTotal", type: "uint256", internalType: "uint256" },
-          { name: "sharesAvailable", type: "uint256", internalType: "uint256" },
-        ],
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    outputs: [],
-    stateMutability: "nonpayable",
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "function",
-    name: "updateMarketOutcomeHolders",
-    inputs: [
-      { name: "marketId", type: "uint256", internalType: "uint256" },
-      { name: "outcomeId", type: "uint256", internalType: "uint256" },
+    "type": "function",
+    "name": "getMarketCreator",
+    "inputs": [
       {
-        name: "updates",
-        type: "tuple[]",
-        internalType:
-          "struct PredictionMarket.MarketOutcomeHolderUpdateDescription[]",
-        components: [
-          { name: "holder", type: "address", internalType: "address" },
-          { name: "amount", type: "uint256", internalType: "uint256" },
-          { name: "claim", type: "bool", internalType: "bool" },
-          { name: "voidedClaim", type: "bool", internalType: "bool" },
-        ],
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    outputs: [],
-    stateMutability: "nonpayable",
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "function",
-    name: "withdraw",
-    inputs: [
-      { name: "token", type: "address", internalType: "address" },
-      { name: "amount", type: "uint256", internalType: "uint256" },
+    "type": "function",
+    "name": "getMarketData",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    outputs: [],
-    stateMutability: "nonpayable",
+    "outputs": [
+      {
+        "name": "state",
+        "type": "uint8",
+        "internalType": "enum PredictionMarket.MarketState"
+      },
+      {
+        "name": "closesAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "sharesAvailable",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "resolvedOutcomeId",
+        "type": "int256",
+        "internalType": "int256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "MarketActionTx",
-    inputs: [
-      { name: "user", type: "address", indexed: true, internalType: "address" },
+    "type": "function",
+    "name": "getMarketFee",
+    "inputs": [
       {
-        name: "action",
-        type: "uint8",
-        indexed: true,
-        internalType: "enum PredictionMarket.MarketAction",
-      },
-      {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
-      },
-      {
-        name: "outcomeId",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "shares",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "value",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "timestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "MarketCloseDateEdited",
-    inputs: [
-      { name: "user", type: "address", indexed: true, internalType: "address" },
+    "type": "function",
+    "name": "getMarketFees",
+    "inputs": [
       {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
-      },
-      {
-        name: "closesAtTimestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "timestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "buyFees",
+        "type": "tuple",
+        "internalType": "struct PredictionMarket.Fees",
+        "components": [
+          {
+            "name": "fee",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "treasuryFee",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "distributorFee",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "sellFees",
+        "type": "tuple",
+        "internalType": "struct PredictionMarket.Fees",
+        "components": [
+          {
+            "name": "fee",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "treasuryFee",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "distributorFee",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "treasury",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "distributor",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "MarketCreated",
-    inputs: [
-      { name: "user", type: "address", indexed: true, internalType: "address" },
+    "type": "function",
+    "name": "getMarketLiquidityPrice",
+    "inputs": [
       {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
-      },
-      {
-        name: "outcomes",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "question",
-        type: "string",
-        indexed: false,
-        internalType: "string",
-      },
-      { name: "image", type: "string", indexed: false, internalType: "string" },
-      {
-        name: "token",
-        type: "address",
-        indexed: false,
-        internalType: "contract IERC20",
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "MarketLiquidity",
-    inputs: [
+    "type": "function",
+    "name": "getMarketOutcomeData",
+    "inputs": [
       {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
-        name: "value",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "price",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "timestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "price",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "availableShares",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "totalShares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "MarketOutcomePrice",
-    inputs: [
+    "type": "function",
+    "name": "getMarketOutcomeIds",
+    "inputs": [
       {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
-      },
-      {
-        name: "outcomeId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
-      },
-      {
-        name: "value",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "timestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "MarketOutcomeShares",
-    inputs: [
+    "type": "function",
+    "name": "getMarketOutcomePrice",
+    "inputs": [
       {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
-        name: "timestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "outcomeShares",
-        type: "uint256[]",
-        indexed: false,
-        internalType: "uint256[]",
-      },
-      {
-        name: "liquidity",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "MarketPaused",
-    inputs: [
-      { name: "user", type: "address", indexed: true, internalType: "address" },
+    "type": "function",
+    "name": "getMarketOutcomesShares",
+    "inputs": [
       {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
-      },
-      { name: "paused", type: "bool", indexed: false, internalType: "bool" },
-      {
-        name: "timestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "MarketResolved",
-    inputs: [
-      { name: "user", type: "address", indexed: true, internalType: "address" },
+    "type": "function",
+    "name": "getMarketPaused",
+    "inputs": [
       {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
-      },
-      {
-        name: "outcomeId",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "timestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      { name: "admin", type: "bool", indexed: false, internalType: "bool" },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "OwnershipTransferred",
-    inputs: [
+    "type": "function",
+    "name": "getMarketPrices",
+    "inputs": [
       {
-        name: "previousOwner",
-        type: "address",
-        indexed: true,
-        internalType: "address",
-      },
-      {
-        name: "newOwner",
-        type: "address",
-        indexed: true,
-        internalType: "address",
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomes",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
-    type: "event",
-    name: "Referral",
-    inputs: [
-      { name: "user", type: "address", indexed: true, internalType: "address" },
+    "type": "function",
+    "name": "getMarketResolvedOutcome",
+    "inputs": [
       {
-        name: "marketId",
-        type: "uint256",
-        indexed: true,
-        internalType: "uint256",
-      },
-      { name: "code", type: "string", indexed: false, internalType: "string" },
-      {
-        name: "action",
-        type: "uint8",
-        indexed: false,
-        internalType: "enum PredictionMarket.MarketAction",
-      },
-      {
-        name: "outcomeId",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "value",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
-      {
-        name: "timestamp",
-        type: "uint256",
-        indexed: false,
-        internalType: "uint256",
-      },
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
     ],
-    anonymous: false,
+    "outputs": [
+      {
+        "name": "",
+        "type": "int256",
+        "internalType": "int256"
+      }
+    ],
+    "stateMutability": "view"
   },
+  {
+    "type": "function",
+    "name": "getMarketSellFee",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMarketShares",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomes",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMarkets",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUserClaimStatus",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "winningsToClaim",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "winningsClaimed",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "liquidityToClaim",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "liquidityClaimed",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "claimableFees",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUserClaimableFees",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUserLiquidityPoolShare",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getUserMarketShares",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomes",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isMarketVoided",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "marketIndex",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "referralBuy",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minOutcomeSharesToBuy",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "code",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "referralBuyWithETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minOutcomeSharesToBuy",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "code",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "referralSell",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxOutcomeSharesToSell",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "code",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "referralSellToETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxOutcomeSharesToSell",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "code",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeLiquidity",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeLiquidityToETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "renounceOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sell",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxOutcomeSharesToSell",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sellToETH",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxOutcomeSharesToSell",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "inputs": [
+      {
+        "name": "newOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateMarket",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "update",
+        "type": "tuple",
+        "internalType": "struct PredictionMarket.MarketUpdateDescription",
+        "components": [
+          {
+            "name": "closesAtTimestamp",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "balance",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidity",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sharesAvailable",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "state",
+            "type": "uint8",
+            "internalType": "enum PredictionMarket.MarketState"
+          },
+          {
+            "name": "resolvedOutcomeId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "feesPoolWeight",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "feesTreasury",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "feesDistributor",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "buyFees",
+            "type": "tuple",
+            "internalType": "struct PredictionMarket.Fees",
+            "components": [
+              {
+                "name": "fee",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "treasuryFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "distributorFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "sellFees",
+            "type": "tuple",
+            "internalType": "struct PredictionMarket.Fees",
+            "components": [
+              {
+                "name": "fee",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "treasuryFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "distributorFee",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "outcomeCount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "contract IERC20"
+          },
+          {
+            "name": "creator",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "paused",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateMarketFeesHolders",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "updates",
+        "type": "tuple[]",
+        "internalType": "struct PredictionMarket.MarketFeesHolderUpdateDescription[]",
+        "components": [
+          {
+            "name": "holder",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateMarketLiquidityHolders",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "updates",
+        "type": "tuple[]",
+        "internalType": "struct PredictionMarket.MarketLiquidityHolderUpdateDescription[]",
+        "components": [
+          {
+            "name": "holder",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claim",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateMarketOutcome",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "update",
+        "type": "tuple",
+        "internalType": "struct PredictionMarket.MarketOutcomeUpdateDescription",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "marketId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sharesTotal",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sharesAvailable",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateMarketOutcomeHolders",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "updates",
+        "type": "tuple[]",
+        "internalType": "struct PredictionMarket.MarketOutcomeHolderUpdateDescription[]",
+        "components": [
+          {
+            "name": "holder",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claim",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "voidedClaim",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "withdraw",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "MarketActionTx",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "action",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum PredictionMarket.MarketAction"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketCloseDateEdited",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "closesAtTimestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketCreated",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomes",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "question",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "image",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "contract IERC20"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketLiquidity",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "price",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketOutcomePrice",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketOutcomeShares",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeShares",
+        "type": "uint256[]",
+        "indexed": false,
+        "internalType": "uint256[]"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketPaused",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "paused",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketResolved",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "admin",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Referral",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "code",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "action",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum PredictionMarket.MarketAction"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  }
 ] as const;

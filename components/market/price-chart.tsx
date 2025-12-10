@@ -22,7 +22,7 @@ import { parseAbiItem } from "viem";
 import { PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
 import { getPrice } from "@/lib/market-math";
 import { getOutcomeColor } from "@/lib/outcome-colors";
-import { formatChartDate, formatTooltipDate } from "@/lib/formatters";
+import { formatDynamicChartDate, formatTooltipDate } from "@/lib/formatters";
 import { Loader2 } from "lucide-react";
 
 type TimeFrame = "24h" | "7d" | "30d" | "all";
@@ -115,6 +115,14 @@ export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0 }: Pric
 
   const hasData = filteredData.length > 0;
 
+  // Calculate the actual time span of displayed data for dynamic formatting
+  const dataTimeSpanMs = useMemo(() => {
+    if (filteredData.length < 2) return 0;
+    const first = filteredData[0].timestamp as number;
+    const last = filteredData[filteredData.length - 1].timestamp as number;
+    return last - first;
+  }, [filteredData]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -158,8 +166,8 @@ export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0 }: Pric
               tickLine={false}
               axisLine={false}
               tickMargin={8}
-              minTickGap={timeFrame === '24h' ? 30 : 100}
-              tickFormatter={(value) => formatChartDate(value / 1000, timeFrame)}
+              minTickGap={dataTimeSpanMs < 60 * 60 * 1000 ? 60 : 80}
+              tickFormatter={(value) => formatDynamicChartDate(value / 1000, dataTimeSpanMs)}
               fontSize={11}
             />
             <YAxis
@@ -209,4 +217,3 @@ export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0 }: Pric
     </div>
   );
 }
-

@@ -5,7 +5,7 @@
 
 // Configuration
 const API_BASE_URL = 'https://your-domain.com'; // Update with actual domain
-const PREDICTION_MARKET_ADDRESS = '0x45cbac951f103663a26c66365e678c245e378042'; // Update with deployed address
+const PREDICTION_MARKET_ADDRESS = '0xcCfD5223e14D0A24aF2A80A6931c228F0a4137E0'; // Update with deployed address
 const USDC_DECIMALS = 6;
 
 // State

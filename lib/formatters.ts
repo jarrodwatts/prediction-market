@@ -179,15 +179,16 @@ export function formatTimeRemaining(expiresAt: string | number | bigint): string
 }
 
 /**
- * Formats a timestamp for chart display based on timeframe.
+ * Formats a timestamp for chart display based on actual data time span.
+ * Dynamically chooses the best format based on how much time the data covers.
  *
  * @param timestamp - Unix timestamp in seconds
- * @param timeframe - Chart timeframe ("24h" | "7d" | "30d" | "all")
- * @returns Formatted time string appropriate for the timeframe
+ * @param dataTimeSpanMs - The total time span of the data in milliseconds
+ * @returns Formatted time string appropriate for the data span
  */
-export function formatChartDate(
+export function formatDynamicChartDate(
   timestamp: number,
-  timeframe: "24h" | "7d" | "30d" | "all"
+  dataTimeSpanMs: number
 ): string {
   // Handle invalid input
   if (timestamp === undefined || timestamp === null || isNaN(timestamp)) {
@@ -201,7 +202,22 @@ export function formatChartDate(
     return "";
   }
 
-  if (timeframe === "24h") {
+  const ONE_MINUTE = 60 * 1000;
+  const ONE_HOUR = 60 * ONE_MINUTE;
+  const ONE_DAY = 24 * ONE_HOUR;
+
+  // Less than 10 minutes: show time with seconds
+  if (dataTimeSpanMs < 10 * ONE_MINUTE) {
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  }
+
+  // Less than 1 hour: show time with minutes
+  if (dataTimeSpanMs < ONE_HOUR) {
     return date.toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
@@ -209,7 +225,17 @@ export function formatChartDate(
     });
   }
 
-  if (timeframe === "7d") {
+  // Less than 24 hours: show time
+  if (dataTimeSpanMs < ONE_DAY) {
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  // Less than 7 days: show date + time
+  if (dataTimeSpanMs < 7 * ONE_DAY) {
     return date.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
@@ -218,6 +244,7 @@ export function formatChartDate(
     });
   }
 
+  // 7+ days: show just the date
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",

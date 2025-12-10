@@ -20,6 +20,12 @@ interface MarketHeaderProps {
 
 export function MarketHeader({ market }: MarketHeaderProps) {
   const [imageError, setImageError] = useState(false);
+  
+  // Check if market has ended
+  const now = Date.now();
+  const closesAtMs = Number(market.closesAt) * 1000;
+  const isEnded = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
+  const timeRemaining = formatTimeRemaining(market.closesAt);
 
   return (
     <div className="flex items-start gap-4">
@@ -49,7 +55,7 @@ export function MarketHeader({ market }: MarketHeaderProps) {
             </span>
           </span>
           <span>|</span>
-          <span>Ends {formatTimeRemaining(market.closesAt)}</span>
+          <span>{isEnded ? "Ended" : `Ends ${timeRemaining}`}</span>
           <span>|</span>
           <span>Published {formatShortDate(new Date(Number(market.createdAt) * 1000).toISOString())}</span>
         </div>

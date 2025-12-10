@@ -10,6 +10,7 @@ type TransactionType =
   | "removeLiquidity" 
   | "claimFees" 
   | "claimLiquidity"
+  | "claimWinnings"
   | "approve"
 
 interface TransactionMessages {
@@ -48,6 +49,11 @@ const transactionMessages: Record<TransactionType, TransactionMessages> = {
     pending: { title: "Claiming Liquidity", description: "Collecting your liquidity..." },
     success: { title: "Liquidity Claimed", description: "Your liquidity has been returned" },
     error: { title: "Claim Failed", description: "Unable to claim liquidity" },
+  },
+  claimWinnings: {
+    pending: { title: "Claiming Winnings", description: "Collecting your winnings..." },
+    success: { title: "Winnings Claimed", description: "Your winnings have been transferred" },
+    error: { title: "Claim Failed", description: "Unable to claim winnings" },
   },
   approve: {
     pending: { title: "Approving USDC", description: "Granting spend permission..." },
