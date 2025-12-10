@@ -10,5 +10,7 @@ export interface MarketData {
   sharesAvailable: bigint;
   resolvedOutcomeId: bigint;
   outcomeCount: number;
+  createdAt: bigint;
+  volume: bigint;
 }
 

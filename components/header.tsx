@@ -22,7 +22,7 @@ export function Header() {
       className={`sticky top-0 z-50 w-full transition-all duration-300 ${scrolled ? "bg-background/5 backdrop-blur-xl" : "bg-transparent"
         }`}
     >
-      <div className="relative mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
+      <div className="relative mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
         {/* Left: Logo */}
         <Link href="/" className="flex items-center gap-2">
           <TrendingUp className="size-5" />

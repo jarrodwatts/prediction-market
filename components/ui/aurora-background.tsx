@@ -1,6 +1,10 @@
+import React from "react";
+
 export const AuroraBackground = () => {
   return (
-    <div className="animate-rainbow pointer-events-none fixed inset-x-0 -top-32 -z-10 h-[50rem] w-full bg-[linear-gradient(90deg,var(--color-1),var(--color-5),var(--color-3),var(--color-4),var(--color-2))] bg-[length:200%] opacity-30 blur-[100px] [--speed:8s] [mask-image:radial-gradient(ellipse_100%_80%_at_50%_-10%,black_0%,transparent_70%)] dark:opacity-25"></div>
+    <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+      <div className="absolute -top-[10%] -left-[10%] w-[70rem] h-[70rem] bg-blue-200 rounded-full mix-blend-multiply filter blur-[160px] opacity-20 dark:mix-blend-screen dark:bg-blue-600/20 dark:opacity-15"></div>
+      <div className="absolute top-[10%] -right-[10%] w-[70rem] h-[70rem] bg-red-200 rounded-full mix-blend-multiply filter blur-[160px] opacity-20 dark:mix-blend-screen dark:bg-red-600/20 dark:opacity-15"></div>
+    </div>
   );
 };
-

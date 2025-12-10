@@ -77,10 +77,11 @@ export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogPro
       const closesAt = BigInt(Math.floor(Date.now() / 1000) + (Number(duration) * 24 * 60 * 60));
       const value = parseEther(initialLiquidity);
       
-      const zeroFees = {
-        fee: 0n,
-        treasuryFee: 0n,
-        distributorFee: 0n
+      // Fees: 1% each = 100 basis points (10000 = 100%)
+      const defaultFees = {
+        fee: 100n,           // 1% to liquidity providers
+        treasuryFee: 100n,   // 1% to treasury
+        distributorFee: 100n // 1% to distributor
       };
 
       const desc = {
@@ -91,8 +92,8 @@ export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogPro
         distribution: [50n, 50n],
         question,
         image,
-        buyFees: zeroFees,
-        sellFees: zeroFees,
+        buyFees: defaultFees,
+        sellFees: defaultFees,
         treasury: "0x0000000000000000000000000000000000000000" as `0x${string}`,
         distributor: "0x0000000000000000000000000000000000000000" as `0x${string}`
       };
