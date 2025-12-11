@@ -4,13 +4,14 @@ import { kv } from '@vercel/kv'
  * Prediction data stored in KV
  */
 export interface PredictionData {
-  marketId: bigint
+  marketId: bigint | null // null while market is being created on-chain
   channelId: string
   question: string
   outcomes: string[]
   outcomeMap: Record<string, number> // Twitch outcome ID -> our index
   locksAt: number // Unix timestamp
   createdAt: number
+  state?: 'pending' | 'active' | 'locked' | 'resolved' // Track state for fast responses
 }
 
 /**
@@ -24,6 +25,7 @@ export interface ChannelConfig {
 
 /**
  * Store prediction -> market mapping when a prediction begins
+ * Called immediately when Twitch prediction starts (before on-chain creation)
  */
 export async function storePredictionMapping(
   twitchPredictionId: string,
@@ -34,7 +36,7 @@ export async function storePredictionMapping(
     `prediction:${twitchPredictionId}`,
     {
       ...data,
-      marketId: data.marketId.toString(), // BigInt can't be serialized directly
+      marketId: data.marketId?.toString() ?? null, // BigInt can't be serialized directly
     },
     { ex: 86400 }
   )
@@ -48,12 +50,33 @@ export async function storePredictionMapping(
 }
 
 /**
+ * Update prediction data (e.g., when market is created on-chain)
+ */
+export async function updatePredictionMapping(
+  twitchPredictionId: string,
+  updates: Partial<PredictionData>
+): Promise<void> {
+  const existing = await getPredictionData(twitchPredictionId)
+  if (!existing) return
+  
+  await kv.set(
+    `prediction:${twitchPredictionId}`,
+    {
+      ...existing,
+      ...updates,
+      marketId: updates.marketId?.toString() ?? existing.marketId?.toString() ?? null,
+    },
+    { ex: 86400 }
+  )
+}
+
+/**
  * Get prediction data by Twitch prediction ID
  */
 export async function getPredictionData(
   twitchPredictionId: string
 ): Promise<PredictionData | null> {
-  const data = await kv.get<Omit<PredictionData, 'marketId'> & { marketId: string }>(
+  const data = await kv.get<Omit<PredictionData, 'marketId'> & { marketId: string | null }>(
     `prediction:${twitchPredictionId}`
   )
   
@@ -61,7 +84,7 @@ export async function getPredictionData(
   
   return {
     ...data,
-    marketId: BigInt(data.marketId),
+    marketId: data.marketId ? BigInt(data.marketId) : null,
   }
 }
 

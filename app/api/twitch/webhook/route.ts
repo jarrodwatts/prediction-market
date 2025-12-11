@@ -10,6 +10,7 @@ import {
 } from '@/lib/twitch/eventsub'
 import {
   storePredictionMapping,
+  updatePredictionMapping,
   getPredictionData,
   clearActivePrediction,
   getStreamerSession,
@@ -248,16 +249,37 @@ async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
   
   console.log(`✅ Streamer found, wallet: ${streamerSession.walletAddress}`)
   
+  // Calculate close time from locks_at
+  const locksAt = Math.floor(new Date(event.locks_at).getTime() / 1000)
+  
+  // Create outcome mapping (Twitch outcome ID -> our index)
+  const outcomeMap: Record<string, number> = {}
+  event.outcomes.forEach((outcome, index) => {
+    outcomeMap[outcome.id] = index
+  })
+  
+  // OPTIMIZATION: Store to KV IMMEDIATELY so UI can show "pending" state
+  // This allows the overlay to display the prediction instantly while the market is being created on-chain
+  await storePredictionMapping(event.id, {
+    marketId: null, // Will be set after on-chain creation
+    channelId: event.broadcaster_user_id,
+    question: event.title,
+    outcomes: event.outcomes.map(o => o.title),
+    outcomeMap,
+    locksAt,
+    createdAt: Date.now(),
+    state: 'pending',
+  })
+  
+  console.log(`📝 Prediction stored immediately (pending on-chain creation)`)
+  
   try {
-    // Calculate close time from locks_at
-    const locksAt = Math.floor(new Date(event.locks_at).getTime() / 1000)
-    
     // Fetch streamer's profile image from Twitch
     const profileImage = await getTwitchProfileImage(event.broadcaster_user_id)
     
     console.log(`Creating market with ${event.outcomes.length} outcomes, closes at ${new Date(locksAt * 1000).toISOString()}`)
     
-    // Create the market with liquidity
+    // Create the market with liquidity (this takes a few seconds)
     const { marketId, txHash } = await createMarketWithLiquidity({
       question: event.title,
       outcomes: event.outcomes.length,
@@ -269,26 +291,17 @@ async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
     
     console.log(`✅ Market created: ${marketId} (tx: ${txHash})`)
     
-    // Create outcome mapping (Twitch outcome ID -> our index)
-    const outcomeMap: Record<string, number> = {}
-    event.outcomes.forEach((outcome, index) => {
-      outcomeMap[outcome.id] = index
-    })
-    
-    // Store prediction -> market mapping
-    await storePredictionMapping(event.id, {
+    // Update KV with the market ID now that it's confirmed on-chain
+    await updatePredictionMapping(event.id, {
       marketId,
-      channelId: event.broadcaster_user_id,
-      question: event.title,
-      outcomes: event.outcomes.map(o => o.title),
-      outcomeMap,
-      locksAt,
-      createdAt: Date.now(),
+      state: 'active',
     })
     
-    console.log(`✅ Prediction mapping stored for ${event.id}`)
+    console.log(`✅ Prediction mapping updated with marketId ${marketId}`)
   } catch (error) {
     console.error('❌ Error creating market:', error)
+    // Clean up the pending entry on error
+    await clearActivePrediction(event.broadcaster_user_id)
     // Don't throw - we don't want to cause Twitch to retry
   }
 }
@@ -306,7 +319,18 @@ async function handlePredictionLock(event: TwitchPredictionLockEvent) {
     return
   }
   
+  // OPTIMIZATION: Update KV state to 'locked' IMMEDIATELY
+  // This allows the UI to show "locked" state before the on-chain tx confirms
+  await updatePredictionMapping(event.id, { state: 'locked' })
+  console.log(`📝 KV state updated to 'locked' immediately`)
+  
   try {
+    // Only proceed with on-chain lock if we have a marketId
+    if (!predictionData.marketId) {
+      console.log(`⚠️ Market not yet created on-chain for prediction ${event.id}`)
+      return
+    }
+    
     const txHash = await lockMarket(predictionData.marketId)
     
     if (txHash) {
@@ -315,7 +339,9 @@ async function handlePredictionLock(event: TwitchPredictionLockEvent) {
       console.log(`⏭️ Market ${predictionData.marketId} was already locked or not open`)
     }
   } catch (error) {
-    console.error('❌ Error locking market:', error)
+    console.error('❌ Error locking market on-chain:', error)
+    // Note: KV state remains 'locked' even if on-chain fails
+    // This is intentional - the prediction IS locked on Twitch
   }
 }
 
@@ -332,32 +358,55 @@ async function handlePredictionEnd(event: TwitchPredictionEndEvent) {
     return
   }
   
+  // Check if market was created on-chain
+  if (!predictionData.marketId) {
+    console.log(`⚠️ Market not yet created on-chain for prediction ${event.id}, clearing active prediction`)
+    await clearActivePrediction(predictionData.channelId)
+    return
+  }
+  
+  const marketId = predictionData.marketId // Non-null at this point
+  
   try {
     let txHash: string = ''
     
     if (event.status === 'canceled' || !event.winning_outcome_id) {
       // Prediction was canceled - void the market
-      console.log(`🚫 Voiding market ${predictionData.marketId}`)
-      txHash = await voidMarket(predictionData.marketId)
+      console.log(`🚫 Voiding market ${marketId}`)
+      txHash = await voidMarket(marketId)
     } else {
       // Prediction resolved - find the winning outcome index
       const winningIndex = predictionData.outcomeMap[event.winning_outcome_id]
       
       if (winningIndex === undefined) {
         console.error(`Winning outcome ${event.winning_outcome_id} not found in outcome map`)
-        txHash = await voidMarket(predictionData.marketId)
+        txHash = await voidMarket(marketId)
       } else {
-        console.log(`🏆 Resolving market ${predictionData.marketId} with outcome ${winningIndex}`)
-        txHash = await resolveMarket(predictionData.marketId, winningIndex)
+        console.log(`🏆 Resolving market ${marketId} with outcome ${winningIndex}`)
+        txHash = await resolveMarket(marketId, winningIndex)
       }
     }
     
     if (txHash) {
-      console.log(`✅ Market ${predictionData.marketId} resolved on-chain (tx: ${txHash})`)
-      // Clear the active prediction for this channel
-      await clearActivePrediction(predictionData.channelId)
+      console.log(`✅ Market ${marketId} resolved on-chain (tx: ${txHash})`)
+      
+      // Update KV state to 'resolved' so the UI can show the result card
+      // Don't clear immediately - let the result be visible for a bit
+      await updatePredictionMapping(event.id, { state: 'resolved' })
+      console.log(`📝 KV state updated to 'resolved'`)
+      
+      // Clear active prediction after a delay (30 seconds) to allow result card to show
+      // In production, you might want to use a scheduled job instead
+      setTimeout(async () => {
+        try {
+          await clearActivePrediction(predictionData.channelId)
+          console.log(`🧹 Cleared active prediction for channel ${predictionData.channelId}`)
+        } catch (e) {
+          console.error('Error clearing active prediction:', e)
+        }
+      }, 30000) // 30 seconds
     } else {
-      console.log(`⏳ Market ${predictionData.marketId} could not be resolved yet - will need manual resolution`)
+      console.log(`⏳ Market ${marketId} could not be resolved yet - will need manual resolution`)
     }
   } catch (error) {
     console.error('❌ Error resolving market:', error)

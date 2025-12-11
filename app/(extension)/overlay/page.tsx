@@ -25,7 +25,13 @@ const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`
 const USDC_DECIMALS = 6
 
 // API Base URL for fetching market data
-const API_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || ''
+// Use relative URLs when on localhost to avoid CORS issues
+const getApiBaseUrl = () => {
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return '' // Use relative URLs on localhost
+  }
+  return process.env.NEXT_PUBLIC_APP_URL || ''
+}
 
 // ERC20 ABI for approval and balance
 const ERC20_ABI = [
@@ -68,6 +74,7 @@ interface MarketApiResponse {
   closesAt: number
   liquidity: string
   balance: string
+  resolvedOutcome?: number | null
 }
 
 // Mock market data for local testing (use ?mock=true)
@@ -179,6 +186,15 @@ export default function OverlayPage() {
     query: { enabled: !!market?.id },
   })
 
+  // Get user's shares for this market (returns [liquidity, outcomeShares[]])
+  const { data: userShares } = useReadContract({
+    address: PREDICTION_MARKET_ADDRESS,
+    abi: PREDICTION_MARKET_ABI,
+    functionName: 'getUserMarketShares',
+    args: [BigInt(market?.id || '0'), address!],
+    query: { enabled: !!market?.id && isConnected && !!address },
+  })
+
   // Calculate prices from on-chain data
   const outcomeShares = shares ? shares[1] : []
   const liquidity = shares ? shares[0] : 0n
@@ -230,7 +246,7 @@ export default function OverlayPage() {
     const fetchMarket = async () => {
       try {
         setIsLoadingMarket(true)
-        const res = await fetch(`${API_BASE_URL}/api/markets/active?channelId=${effectiveChannelId}`, {
+        const res = await fetch(`${getApiBaseUrl()}/api/markets/active?channelId=${effectiveChannelId}`, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         })
         
@@ -254,7 +270,7 @@ export default function OverlayPage() {
     }
 
     fetchMarket()
-    const interval = setInterval(fetchMarket, 5000) // Poll every 5 seconds
+    const interval = setInterval(fetchMarket, 2000) // Poll every 2 seconds for responsive updates
     return () => clearInterval(interval)
   }, [isMockMode, effectiveIsReady, effectiveChannelId, token])
 
@@ -353,14 +369,202 @@ export default function OverlayPage() {
   }, [])
 
   const isLoading = isWritePending || isBatchPending || isConfirming || isPending
+  
+  // Check market state - also consider time-based closure
+  const now = Math.floor(Date.now() / 1000)
+  const isTimePassed = market?.closesAt ? now > market.closesAt : false
+  const isMarketClosed = market?.state === 'closed' || (market?.state === 'open' && isTimePassed)
+  const isMarketResolved = market?.state === 'resolved'
+  const isMarketPending = market?.state === 'pending'
 
   // No market state - show minimal badge
-  if (!market || market.state !== 'open') {
+  if (!market) {
     return (
       <div className="fixed bottom-20 right-5">
         <div className="flex items-center gap-2 px-4 py-2 bg-black/70 backdrop-blur-md rounded-full text-white/50 text-sm">
           <span className="text-lg">🎯</span>
           <span>No active prediction</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Market is being created on-chain - show loading state
+  if (isMarketPending) {
+    return (
+      <div className="fixed bottom-20 right-5 w-80">
+        <div className="bg-black/92 backdrop-blur-xl rounded-2xl border border-purple-500/30 overflow-hidden shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center gap-3 p-3 bg-purple-500/10 border-b border-purple-500/20">
+            <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
+            <span className="flex-1 font-semibold text-sm text-white truncate">
+              {market.question}
+            </span>
+          </div>
+
+          {/* Pending State */}
+          <div className="p-4 space-y-3">
+            <div className="flex gap-2">
+              {market.outcomes.map((outcome, idx) => {
+                const isYes = idx === 0
+                
+                return (
+                  <div
+                    key={idx}
+                    className="flex-1 p-3 rounded-xl border border-white/10 bg-white/5 text-center opacity-50"
+                  >
+                    <div className="text-sm font-semibold text-white/70">{outcome}</div>
+                    <div className={cn(
+                      'text-2xl font-bold',
+                      isYes ? 'text-emerald-400/50' : 'text-red-400/50'
+                    )}>
+                      50%
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            
+            <div className="text-center py-2">
+              <div className="text-purple-400 font-semibold text-sm flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Creating Market...
+              </div>
+              <div className="text-white/50 text-xs mt-1">Betting opens shortly</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Market is closed (locked) - show locked state
+  if (isMarketClosed) {
+    return (
+      <div className="fixed bottom-20 right-5 w-80">
+        <div className="bg-black/92 backdrop-blur-xl rounded-2xl border border-yellow-500/30 overflow-hidden shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center gap-3 p-3 bg-yellow-500/10 border-b border-yellow-500/20">
+            <span className="text-lg">🔒</span>
+            <span className="flex-1 font-semibold text-sm text-white truncate">
+              {market.question}
+            </span>
+          </div>
+
+          {/* Locked State */}
+          <div className="p-4 space-y-3">
+            <div className="flex gap-2">
+              {market.outcomes.map((outcome, idx) => {
+                const price = outcomePrices[idx] || 0.5
+                const isYes = idx === 0
+                
+                return (
+                  <div
+                    key={idx}
+                    className="flex-1 p-3 rounded-xl border border-white/10 bg-white/5 text-center opacity-75"
+                  >
+                    <div className="text-sm font-semibold text-white/70">{outcome}</div>
+                    <div className={cn(
+                      'text-2xl font-bold',
+                      isYes ? 'text-emerald-400/70' : 'text-red-400/70'
+                    )}>
+                      {Math.round(price * 100)}%
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            
+            <div className="text-center py-2">
+              <div className="text-yellow-400 font-semibold text-sm">Betting Closed</div>
+              <div className="text-white/50 text-xs mt-1">Awaiting results...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Market is resolved - show result card
+  if (isMarketResolved) {
+    const winningOutcomeIndex = market.resolvedOutcome ?? 0
+    const winningOutcome = market.outcomes[winningOutcomeIndex] || 'Unknown'
+    const isYesWinner = winningOutcomeIndex === 0
+    
+    // getUserMarketShares returns [liquidity, outcomeShares[]]
+    const userOutcomeShares = userShares ? (userShares as [bigint, bigint[]])[1] : undefined
+    const winningSharesRaw = userOutcomeShares?.[winningOutcomeIndex] ?? 0n
+    const losingSharesRaw = userOutcomeShares?.filter((_, i) => i !== winningOutcomeIndex).reduce((a, b) => a + b, 0n) ?? 0n
+    
+    // Shares are in 18 decimals, each winning share pays out $1 (6 decimals USDC)
+    // So we need to convert: shares (18 dec) -> USDC (6 dec) = divide by 10^12
+    const winningsUSDC = Number(winningSharesRaw) / 1e18
+    const hasPosition = winningSharesRaw > 0n || losingSharesRaw > 0n
+    const isWinner = winningSharesRaw > 0n
+    
+    return (
+      <div className="fixed bottom-20 right-5 w-80">
+        <div className={cn(
+          "bg-black/92 backdrop-blur-xl rounded-2xl border overflow-hidden shadow-2xl",
+          isYesWinner ? "border-emerald-500/30" : "border-red-500/30"
+        )}>
+          {/* Header */}
+          <div className={cn(
+            "flex items-center gap-3 p-3 border-b",
+            isYesWinner ? "bg-emerald-500/10 border-emerald-500/20" : "bg-red-500/10 border-red-500/20"
+          )}>
+            <span className="text-lg">🏆</span>
+            <span className="flex-1 font-semibold text-sm text-white truncate">
+              {market.question}
+            </span>
+          </div>
+
+          {/* Result */}
+          <div className="p-4 space-y-3">
+            {/* Winning Outcome */}
+            <div className="text-center">
+              <div className="text-white/50 text-xs uppercase tracking-wider mb-1">Winner</div>
+              <div className={cn(
+                "text-3xl font-bold",
+                isYesWinner ? "text-emerald-400" : "text-red-400"
+              )}>
+                {winningOutcome}
+              </div>
+            </div>
+
+            {/* User's Result */}
+            {hasPosition && isConnected ? (
+              <div className={cn(
+                "p-3 rounded-xl text-center",
+                isWinner ? "bg-emerald-500/10 border border-emerald-500/20" : "bg-red-500/10 border border-red-500/20"
+              )}>
+                <div className="text-white/50 text-xs mb-1">Your Result</div>
+                {isWinner ? (
+                  <>
+                    <div className="text-emerald-400 font-bold text-xl">
+                      +${winningsUSDC.toFixed(2)}
+                    </div>
+                    <div className="text-emerald-400/70 text-xs">🎉 You won!</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-red-400 font-bold text-xl">
+                      Lost
+                    </div>
+                    <div className="text-red-400/70 text-xs">Better luck next time</div>
+                  </>
+                )}
+              </div>
+            ) : !isConnected ? (
+              <div className="text-center text-white/40 text-xs">
+                Connect wallet to see your result
+              </div>
+            ) : (
+              <div className="text-center text-white/40 text-xs">
+                You didn't participate in this prediction
+              </div>
+            )}
+          </div>
         </div>
       </div>
     )

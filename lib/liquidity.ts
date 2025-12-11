@@ -193,17 +193,10 @@ export async function resolveMarket(
     return ''
   }
   
-  // Check if market SHOULD be closed (time has passed) even if state hasn't transitioned yet
-  // The contract's transitionLast modifier will handle the state transition when we call it
-  const now = BigInt(Math.floor(Date.now() / 1000))
-  if (state === 0 && now < closesAt) {
-    console.log(`⚠️ Market ${marketId} is still open (closes at ${new Date(Number(closesAt) * 1000).toISOString()})`)
-    console.log(`   Current time: ${new Date(Number(now) * 1000).toISOString()}`)
-    console.log(`   The market will need to be resolved manually after it closes`)
-    return ''
-  }
-  
-  // Either market is closed OR time has passed (contract will auto-transition)
+  // Note: We removed the early return check for open markets
+  // When Twitch locks a prediction early, we use adminPauseMarket which keeps state=0 but sets paused=true
+  // The contract's adminResolveMarketOutcome with transitionLast modifier will handle state transitions
+  // If market is open but paused, resolution should still work
   console.log(`📝 Calling adminResolveMarketOutcome for market ${marketId} with outcome ${outcomeId}`)
   
   const txHash = await walletClient.writeContract({
@@ -240,18 +233,22 @@ export async function lockMarket(marketId: bigint): Promise<string> {
     return ''
   }
   
-  console.log(`🔒 Locking market ${marketId} by setting closeDate to now`)
+  console.log(`🔒 Pausing market ${marketId} using adminPauseMarket`)
   
-  // Lock market by setting closeDate to current time
-  const now = BigInt(Math.floor(Date.now() / 1000))
+  // Use adminPauseMarket to immediately stop all trading
+  // This is called by the owner (our liquidity wallet) and takes effect instantly
   const txHash = await walletClient.writeContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'adminSetMarketCloseDate',
-    args: [marketId, now],
+    functionName: 'adminPauseMarket',
+    args: [marketId],
   })
   
-  await publicClient.waitForTransactionReceipt({ hash: txHash })
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+  
+  if (receipt.status === 'reverted') {
+    throw new Error(`Transaction reverted: ${txHash}`)
+  }
   
   return txHash
 }

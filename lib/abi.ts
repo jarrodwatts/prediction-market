@@ -154,6 +154,19 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
+    "name": "creatorLockMarket",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "buy",
     "inputs": [
       {
