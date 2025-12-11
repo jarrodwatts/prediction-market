@@ -98,10 +98,13 @@ const BET_AMOUNTS = [1, 5, 10, 25]
 
 export default function OverlayPage() {
   // Check for mock mode (?mock=true for local testing)
+  // Or test mode with real data (?channelId=YOUR_CHANNEL_ID)
   const searchParams = useSearchParams()
   const isMockMode = searchParams.get('mock') === 'true'
+  const testChannelId = searchParams.get('channelId') // For testing without Twitch iframe
+  const isTestMode = !!testChannelId
   
-  const [isExpanded, setIsExpanded] = useState(isMockMode) // Auto-expand in mock mode
+  const [isExpanded, setIsExpanded] = useState(isMockMode || isTestMode) // Auto-expand in mock/test mode
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
   const [betAmount, setBetAmount] = useState<number | null>(null)
   const [market, setMarket] = useState<MarketApiResponse | null>(isMockMode ? getMockMarket() : null)
@@ -110,10 +113,10 @@ export default function OverlayPage() {
   const [isPending, setIsPending] = useState(false)
   const [txSuccess, setTxSuccess] = useState(false)
 
-  // Twitch extension context (skipped in mock mode)
+  // Twitch extension context (skipped in mock/test mode)
   const { isReady, channelId, token, minimize } = useTwitchExtension()
-  const effectiveIsReady = isMockMode || isReady
-  const effectiveChannelId = isMockMode ? 'mock-channel' : channelId
+  const effectiveIsReady = isMockMode || isTestMode || isReady
+  const effectiveChannelId = isMockMode ? 'mock-channel' : (testChannelId || channelId)
 
   // Wallet connection
   const { login, logout } = useLoginWithAbstract()
@@ -203,11 +206,13 @@ export default function OverlayPage() {
 
   // Check if approval needed
   const needsApproval = useMemo(() => {
-    if (!betAmount || !usdcAllowance) return false
+    if (!betAmount) return false
+    // If allowance not yet loaded, assume we need approval to be safe
+    if (usdcAllowance === undefined) return true
     try {
       return usdcAllowance < parseUSDC(betAmount.toString())
     } catch {
-      return false
+      return true // Assume approval needed on error
     }
   }, [betAmount, usdcAllowance])
 
@@ -219,12 +224,13 @@ export default function OverlayPage() {
       return
     }
     
-    if (!isReady || !channelId) return
+    // Use effective values (supports both Twitch iframe and ?channelId= test mode)
+    if (!effectiveIsReady || !effectiveChannelId) return
 
     const fetchMarket = async () => {
       try {
         setIsLoadingMarket(true)
-        const res = await fetch(`${API_BASE_URL}/api/markets/active?channelId=${channelId}`, {
+        const res = await fetch(`${API_BASE_URL}/api/markets/active?channelId=${effectiveChannelId}`, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         })
         
@@ -250,7 +256,7 @@ export default function OverlayPage() {
     fetchMarket()
     const interval = setInterval(fetchMarket, 5000) // Poll every 5 seconds
     return () => clearInterval(interval)
-  }, [isMockMode, isReady, channelId, token])
+  }, [isMockMode, effectiveIsReady, effectiveChannelId, token])
 
   // Handle transaction success
   const handledHashRef = useRef<string | null>(null)
