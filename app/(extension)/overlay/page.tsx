@@ -119,6 +119,8 @@ export default function OverlayPage() {
   const [marketError, setMarketError] = useState<string | null>(null)
   const [isPending, setIsPending] = useState(false)
   const [txSuccess, setTxSuccess] = useState(false)
+  const [isClaimTx, setIsClaimTx] = useState(false)
+  const [hasClaimed, setHasClaimed] = useState(false)
 
   // Twitch extension context (skipped in mock/test mode)
   const { isReady, channelId, token, minimize } = useTwitchExtension()
@@ -288,9 +290,24 @@ export default function OverlayPage() {
       refetchBalance()
       refetchAllowance()
       refetchShares()
-      setTimeout(() => setTxSuccess(false), 3000)
+      
+      // If this was a claim transaction, mark as claimed and clear the prediction
+      if (isClaimTx) {
+        setHasClaimed(true)
+        setIsClaimTx(false)
+        // Clear the active prediction from KV so next poll shows "no active prediction"
+        if (effectiveChannelId) {
+          fetch(`${getApiBaseUrl()}/api/admin/clear-prediction`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channelId: effectiveChannelId }),
+          }).catch(console.error)
+        }
+      } else {
+        setTimeout(() => setTxSuccess(false), 3000)
+      }
     }
-  }, [isSuccess, hash, refetchBalance, refetchAllowance, refetchShares])
+  }, [isSuccess, hash, refetchBalance, refetchAllowance, refetchShares, isClaimTx, effectiveChannelId])
 
   useEffect(() => {
     if (isBatchSuccess && batchId && batchId !== handledBatchIdRef.current) {
@@ -485,6 +502,19 @@ export default function OverlayPage() {
     )
   }
 
+  // Claim winnings handler
+  const handleClaimWinnings = () => {
+    if (!market?.id) return
+    setIsPending(true)
+    setIsClaimTx(true) // Mark this as a claim transaction
+    writeContract({
+      address: PREDICTION_MARKET_ADDRESS,
+      abi: PREDICTION_MARKET_ABI,
+      functionName: 'claimWinnings',
+      args: [BigInt(market.id)]
+    })
+  }
+
   // Market is resolved - show result card
   if (isMarketResolved) {
     const winningOutcomeIndex = market.resolvedOutcome ?? 0
@@ -493,14 +523,16 @@ export default function OverlayPage() {
     
     // getUserMarketShares returns [liquidity, outcomeShares[]]
     const userOutcomeShares = userShares ? (userShares as [bigint, bigint[]])[1] : undefined
+    const yesShares = userOutcomeShares?.[0] ?? 0n
+    const noShares = userOutcomeShares?.[1] ?? 0n
     const winningSharesRaw = userOutcomeShares?.[winningOutcomeIndex] ?? 0n
-    const losingSharesRaw = userOutcomeShares?.filter((_, i) => i !== winningOutcomeIndex).reduce((a, b) => a + b, 0n) ?? 0n
     
-    // Shares are in 18 decimals, each winning share pays out $1 (6 decimals USDC)
-    // So we need to convert: shares (18 dec) -> USDC (6 dec) = divide by 10^12
-    const winningsUSDC = Number(winningSharesRaw) / 1e18
-    const hasPosition = winningSharesRaw > 0n || losingSharesRaw > 0n
-    const isWinner = winningSharesRaw > 0n
+    // Shares are in USDC decimals (6)
+    const winningsUSDC = parseFloat(formatUnits(winningSharesRaw, USDC_DECIMALS))
+    const hasYesPosition = yesShares > 0n
+    const hasNoPosition = noShares > 0n
+    const hasPosition = hasYesPosition || hasNoPosition
+    const hasWinningShares = winningSharesRaw > 0n
     
     return (
       <div className="fixed bottom-20 right-5 w-80">
@@ -514,53 +546,113 @@ export default function OverlayPage() {
             isYesWinner ? "bg-emerald-500/10 border-emerald-500/20" : "bg-red-500/10 border-red-500/20"
           )}>
             <span className="text-lg">🏆</span>
-            <span className="flex-1 font-semibold text-sm text-white truncate">
-              {market.question}
+            <span className="flex-1 font-semibold text-sm text-white">
+              Market Resolved
+            </span>
+            <span className={cn(
+              "text-sm font-semibold",
+              isYesWinner ? "text-emerald-400" : "text-red-400"
+            )}>
+              {winningOutcome} wins
             </span>
           </div>
 
-          {/* Result */}
+          {/* Content */}
           <div className="p-4 space-y-3">
-            {/* Winning Outcome */}
-            <div className="text-center">
-              <div className="text-white/50 text-xs uppercase tracking-wider mb-1">Winner</div>
-              <div className={cn(
-                "text-3xl font-bold",
-                isYesWinner ? "text-emerald-400" : "text-red-400"
-              )}>
-                {winningOutcome}
-              </div>
-            </div>
+            {/* Status message */}
+            <p className="text-sm text-white/60">
+              This market has been finalized.
+            </p>
 
-            {/* User's Result */}
-            {hasPosition && isConnected ? (
-              <div className={cn(
-                "p-3 rounded-xl text-center",
-                isWinner ? "bg-emerald-500/10 border border-emerald-500/20" : "bg-red-500/10 border border-red-500/20"
-              )}>
-                <div className="text-white/50 text-xs mb-1">Your Result</div>
-                {isWinner ? (
-                  <>
-                    <div className="text-emerald-400 font-bold text-xl">
-                      +${winningsUSDC.toFixed(2)}
+            {/* User's Position */}
+            {hasPosition && isConnected && (
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3 space-y-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-white/50">
+                  Your positions
+                </div>
+                
+                <div className={cn(
+                  "gap-2",
+                  hasYesPosition && hasNoPosition ? "grid grid-cols-2" : "grid grid-cols-1"
+                )}>
+                  {hasYesPosition && (
+                    <div className={cn(
+                      "rounded-lg border px-3 py-2",
+                      winningOutcomeIndex === 0 
+                        ? "border-emerald-500/30 bg-emerald-500/10" 
+                        : "border-white/10 bg-white/5 opacity-50"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-white/60">Yes</span>
+                        <span className={cn(
+                          "text-base font-mono font-semibold",
+                          winningOutcomeIndex === 0 ? "text-emerald-400" : "text-white/40"
+                        )}>
+                          ${parseFloat(formatUnits(yesShares, USDC_DECIMALS)).toFixed(2)}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-emerald-400/70 text-xs">🎉 You won!</div>
-                  </>
+                  )}
+                  {hasNoPosition && (
+                    <div className={cn(
+                      "rounded-lg border px-3 py-2",
+                      winningOutcomeIndex === 1 
+                        ? "border-red-500/30 bg-red-500/10" 
+                        : "border-white/10 bg-white/5 opacity-50"
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-white/60">No</span>
+                        <span className={cn(
+                          "text-base font-mono font-semibold",
+                          winningOutcomeIndex === 1 ? "text-red-400" : "text-white/40"
+                        )}>
+                          ${parseFloat(formatUnits(noShares, USDC_DECIMALS)).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Claim Button or Success */}
+            {hasWinningShares && isConnected && !hasClaimed && (
+              <button
+                onClick={handleClaimWinnings}
+                disabled={isPending || isWritePending || isConfirming}
+                className="w-full py-3 px-4 rounded-xl font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+              >
+                {(isPending || isWritePending || isConfirming) ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
-                  <>
-                    <div className="text-red-400 font-bold text-xl">
-                      Lost
-                    </div>
-                    <div className="text-red-400/70 text-xs">Better luck next time</div>
-                  </>
+                  <span className="text-lg">🪙</span>
                 )}
+                Claim Winnings
+              </button>
+            )}
+
+            {/* Claimed Success */}
+            {hasClaimed && (
+              <div className="w-full py-3 px-4 rounded-xl font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 text-center flex items-center justify-center gap-2">
+                <span className="text-lg">✅</span>
+                Claimed! Winnings sent to your wallet
               </div>
-            ) : !isConnected ? (
-              <div className="text-center text-white/40 text-xs">
+            )}
+
+            {/* Not connected message */}
+            {!isConnected && (
+              <button
+                onClick={login}
+                className="w-full py-2 px-4 rounded-xl text-sm text-white/60 bg-white/5 hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+              >
+                <Wallet className="w-4 h-4" />
                 Connect wallet to see your result
-              </div>
-            ) : (
-              <div className="text-center text-white/40 text-xs">
+              </button>
+            )}
+
+            {/* No position message */}
+            {isConnected && !hasPosition && (
+              <div className="text-center text-white/40 text-xs py-2">
                 You didn't participate in this prediction
               </div>
             )}

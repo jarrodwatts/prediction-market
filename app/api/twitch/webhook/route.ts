@@ -391,20 +391,11 @@ async function handlePredictionEnd(event: TwitchPredictionEndEvent) {
       console.log(`✅ Market ${marketId} resolved on-chain (tx: ${txHash})`)
       
       // Update KV state to 'resolved' so the UI can show the result card
-      // Don't clear immediately - let the result be visible for a bit
+      // The result card stays visible until:
+      // 1. User claims their winnings (client clears it)
+      // 2. Streamer creates a new prediction (replaces this one)
       await updatePredictionMapping(event.id, { state: 'resolved' })
-      console.log(`📝 KV state updated to 'resolved'`)
-      
-      // Clear active prediction after a delay (30 seconds) to allow result card to show
-      // In production, you might want to use a scheduled job instead
-      setTimeout(async () => {
-        try {
-          await clearActivePrediction(predictionData.channelId)
-          console.log(`🧹 Cleared active prediction for channel ${predictionData.channelId}`)
-        } catch (e) {
-          console.error('Error clearing active prediction:', e)
-        }
-      }, 30000) // 30 seconds
+      console.log(`📝 KV state updated to 'resolved' - result card will stay until claim or new prediction`)
     } else {
       console.log(`⏳ Market ${marketId} could not be resolved yet - will need manual resolution`)
     }
