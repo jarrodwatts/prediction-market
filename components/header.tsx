@@ -46,12 +46,6 @@ export function Header() {
           >
             <Github className="size-4" />
           </a>
-          <AnimatedThemeToggler
-            className={cn(
-              buttonVariants({ variant: "ghost", size: "icon" }),
-              "text-muted-foreground hover:text-foreground"
-            )}
-          />
           <div className="mx-1 h-6 w-px bg-border/70" aria-hidden="true" />
           <ConnectWalletButton mode="header" />
         </nav>
