@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from "react"
 import { toast } from "sonner"
+import { parseError, isUserRejection } from "@/lib/errors"
 
 type TransactionType = 
   | "buy" 
@@ -101,29 +102,41 @@ export function useTransactionToast() {
     currentTypeRef.current = null
   }, [])
 
-  const showError = useCallback((type?: TransactionType, customDescription?: string) => {
+  const showError = useCallback((type?: TransactionType, error?: unknown) => {
     const txType = type || currentTypeRef.current
     if (!txType) return
     
     const messages = transactionMessages[txType]
     
-    // Dismiss the loading toast and show error
+    // Dismiss the loading toast
     if (toastIdRef.current) {
       toast.dismiss(toastIdRef.current)
     }
     
-    // Clean up error message for display
-    let description = customDescription || messages.error.description
-    if (description && description.length > 150) {
-      // Truncate long error messages
-      const shortened = description.substring(0, 150)
-      const lastSpace = shortened.lastIndexOf(" ")
-      description = shortened.substring(0, lastSpace > 100 ? lastSpace : 150) + "..."
+    // Check if user cancelled - show a gentler message or skip toast entirely
+    if (error && isUserRejection(error)) {
+      toast.info("Transaction Cancelled", {
+        description: "You cancelled the transaction.",
+      })
+      toastIdRef.current = null
+      currentTypeRef.current = null
+      return
     }
     
-    toast.error(messages.error.title, {
-      description,
-    })
+    // Parse the error for user-friendly messaging
+    if (error) {
+      const parsed = parseError(error, txType)
+      toast.error(parsed.title, {
+        description: parsed.suggestion 
+          ? `${parsed.message} ${parsed.suggestion}`
+          : parsed.message,
+      })
+    } else {
+      // Fallback to default error message
+      toast.error(messages.error.title, {
+        description: messages.error.description,
+      })
+    }
     
     toastIdRef.current = null
     currentTypeRef.current = null
@@ -150,8 +163,38 @@ export const txToast = {
   success: (title: string, description?: string) => {
     toast.success(title, { description })
   },
-  error: (title: string, description?: string) => {
-    toast.error(title, { description })
+  error: (title: string, descriptionOrError?: string | unknown) => {
+    // If second argument is a string, use it directly
+    if (typeof descriptionOrError === "string") {
+      toast.error(title, { description: descriptionOrError })
+      return
+    }
+    // If it's an error object, parse it
+    if (descriptionOrError) {
+      const parsed = parseError(descriptionOrError, title)
+      toast.error(parsed.title, {
+        description: parsed.suggestion 
+          ? `${parsed.message} ${parsed.suggestion}`
+          : parsed.message,
+      })
+    } else {
+      toast.error(title)
+    }
+  },
+  /** Show a user-friendly error toast from any error */
+  fromError: (error: unknown, context?: string) => {
+    if (isUserRejection(error)) {
+      toast.info("Transaction Cancelled", {
+        description: "You cancelled the transaction.",
+      })
+      return
+    }
+    const parsed = parseError(error, context)
+    toast.error(parsed.title, {
+      description: parsed.suggestion 
+        ? `${parsed.message} ${parsed.suggestion}`
+        : parsed.message,
+    })
   },
   info: (title: string, description?: string) => {
     toast.info(title, { description })

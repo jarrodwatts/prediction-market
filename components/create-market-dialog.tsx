@@ -8,6 +8,7 @@ import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract
 import { parseEther } from "viem";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { parseError } from "@/lib/errors";
 
 interface CreateMarketDialogProps {
   open: boolean;
@@ -52,7 +53,10 @@ export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogPro
 
   useEffect(() => {
       if (writeError) {
-          setError(writeError.message);
+          const parsed = parseError(writeError, "createMarket");
+          setError(parsed.suggestion 
+            ? `${parsed.message} ${parsed.suggestion}`
+            : parsed.message);
           setIsSubmitting(false);
       }
       if (wethError) {
@@ -107,9 +111,11 @@ export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogPro
         args: [desc],
         value: value
       });
-    } catch (error: any) {
-      console.error("Failed to prepare transaction:", error);
-      setError(error.message || "Failed to prepare transaction");
+    } catch (error: unknown) {
+      const parsed = parseError(error, "createMarket");
+      setError(parsed.suggestion 
+        ? `${parsed.message} ${parsed.suggestion}`
+        : parsed.message);
       setIsSubmitting(false);
     }
   };

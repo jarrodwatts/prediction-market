@@ -114,6 +114,9 @@ export async function storeStreamerSession(
     refreshToken: string
     walletAddress: string
     expiresAt: number
+    twitchLogin?: string
+    twitchDisplayName?: string
+    profileImageUrl?: string
   }
 ): Promise<void> {
   await kv.set(`streamer:${twitchUserId}`, data)
@@ -127,8 +130,58 @@ export async function getStreamerSession(twitchUserId: string): Promise<{
   refreshToken: string
   walletAddress: string
   expiresAt: number
+  twitchLogin?: string
+  twitchDisplayName?: string
+  profileImageUrl?: string
 } | null> {
   return kv.get(`streamer:${twitchUserId}`)
+}
+
+/**
+ * Store a reverse-lookup from walletAddress -> Twitch profile metadata.
+ * This enables the frontend to show "created by <streamer>" on market cards.
+ */
+export async function storeWalletStreamerProfile(
+  walletAddress: string,
+  data: {
+    twitchUserId: string
+    twitchLogin?: string
+    twitchDisplayName?: string
+    profileImageUrl?: string
+  }
+): Promise<void> {
+  await kv.set(`wallet:${walletAddress.toLowerCase()}:streamer`, data)
+}
+
+export async function getWalletStreamerProfile(walletAddress: string): Promise<{
+  twitchUserId: string
+  twitchLogin?: string
+  twitchDisplayName?: string
+  profileImageUrl?: string
+} | null> {
+  return kv.get(`wallet:${walletAddress.toLowerCase()}:streamer`)
+}
+
+/**
+ * Store market metadata keyed by marketId.
+ * Primarily used to recover Twitch outcome titles for multi-outcome markets.
+ */
+export async function storeMarketOutcomes(
+  marketId: bigint,
+  outcomes: string[]
+): Promise<void> {
+  await kv.set(
+    `market:${marketId.toString()}:outcomes`,
+    { outcomes },
+    // Keep a bit longer than prediction TTL so list views can still render nicely
+    { ex: 86400 * 14 }
+  )
+}
+
+export async function getMarketOutcomes(
+  marketId: bigint
+): Promise<{ outcomes: string[] } | null> {
+  return kv.get(`market:${marketId.toString()}:outcomes`)
 }
 
 /**

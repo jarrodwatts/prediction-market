@@ -14,8 +14,11 @@ import {
   getPredictionData,
   clearActivePrediction,
   getStreamerSession,
+  storeWalletStreamerProfile,
+  storeMarketOutcomes,
 } from '@/lib/kv'
 import { createMarketWithLiquidity, resolveMarket, voidMarket, lockMarket } from '@/lib/liquidity'
+import { recordEventSubWebhook } from '@/lib/dev/eventsub-debug'
 
 // Protocol treasury address (update with actual address)
 const PROTOCOL_TREASURY = process.env.PROTOCOL_TREASURY_ADDRESS || '0x0000000000000000000000000000000000000000'
@@ -122,6 +125,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
     }
     
+    // Record for local/dev diagnostics (best-effort; never throw)
+    try {
+      const subscriptionType =
+        payload?.subscription?.type ||
+        payload?.subscription?.subscription_type ||
+        payload?.type
+      const broadcasterUserId =
+        payload?.event?.broadcaster_user_id ||
+        payload?.subscription?.condition?.broadcaster_user_id
+
+      recordEventSubWebhook({
+        receivedAt: Date.now(),
+        messageType: headers.messageType || 'unknown',
+        messageId: headers.messageId || undefined,
+        timestamp: headers.timestamp || undefined,
+        subscriptionType: typeof subscriptionType === 'string' ? subscriptionType : undefined,
+        broadcasterUserId: typeof broadcasterUserId === 'string' ? broadcasterUserId : undefined,
+        signaturePresent: Boolean(headers.signature),
+      })
+    } catch {
+      // ignore
+    }
+
     // Handle webhook verification challenge FIRST (before signature verification)
     // This is critical - Twitch expects a response within 10 seconds
     if (headers.messageType === MESSAGE_TYPE_VERIFICATION) {
@@ -141,9 +167,31 @@ export async function POST(request: NextRequest) {
           )
           if (!isValid) {
             console.error('❌ Invalid signature on verification challenge')
+            try {
+              recordEventSubWebhook({
+                receivedAt: Date.now(),
+                messageType: headers.messageType || 'webhook_callback_verification',
+                messageId: headers.messageId || undefined,
+                timestamp: headers.timestamp || undefined,
+                signaturePresent: true,
+                signatureValid: false,
+                notes: 'Invalid signature on verification challenge',
+              })
+            } catch {}
             return NextResponse.json({ error: 'Invalid signature' }, { status: 403 })
           }
           console.log('✅ Signature verified')
+          try {
+            recordEventSubWebhook({
+              receivedAt: Date.now(),
+              messageType: headers.messageType || 'webhook_callback_verification',
+              messageId: headers.messageId || undefined,
+              timestamp: headers.timestamp || undefined,
+              signaturePresent: true,
+              signatureValid: true,
+              notes: 'Verification challenge signature OK',
+            })
+          } catch {}
         } catch (e) {
           console.error('Signature verification error:', e)
           // Continue anyway for verification - Twitch needs a response
@@ -161,11 +209,31 @@ export async function POST(request: NextRequest) {
     const webhookSecret = process.env.TWITCH_WEBHOOK_SECRET
     if (!webhookSecret) {
       console.error('TWITCH_WEBHOOK_SECRET not configured')
+      try {
+        recordEventSubWebhook({
+          receivedAt: Date.now(),
+          messageType: headers.messageType || 'notification',
+          messageId: headers.messageId || undefined,
+          timestamp: headers.timestamp || undefined,
+          signaturePresent: Boolean(headers.signature),
+          notes: 'TWITCH_WEBHOOK_SECRET not configured',
+        })
+      } catch {}
       return NextResponse.json({ error: 'Server configuration error' }, { status: 500 })
     }
     
     if (!headers.signature) {
       console.error('Missing signature header')
+      try {
+        recordEventSubWebhook({
+          receivedAt: Date.now(),
+          messageType: headers.messageType || 'notification',
+          messageId: headers.messageId || undefined,
+          timestamp: headers.timestamp || undefined,
+          signaturePresent: false,
+          notes: 'Missing signature header',
+        })
+      } catch {}
       return NextResponse.json({ error: 'Missing signature' }, { status: 403 })
     }
     
@@ -180,10 +248,43 @@ export async function POST(request: NextRequest) {
       
       if (!isValid) {
         console.error('Invalid Twitch signature')
+        try {
+          recordEventSubWebhook({
+            receivedAt: Date.now(),
+            messageType: headers.messageType || 'notification',
+            messageId: headers.messageId || undefined,
+            timestamp: headers.timestamp || undefined,
+            signaturePresent: true,
+            signatureValid: false,
+            notes: 'Invalid Twitch signature',
+          })
+        } catch {}
         return NextResponse.json({ error: 'Invalid signature' }, { status: 403 })
       }
+      try {
+        recordEventSubWebhook({
+          receivedAt: Date.now(),
+          messageType: headers.messageType || 'notification',
+          messageId: headers.messageId || undefined,
+          timestamp: headers.timestamp || undefined,
+          signaturePresent: true,
+          signatureValid: true,
+          notes: 'Signature OK',
+        })
+      } catch {}
     } catch (e) {
       console.error('Signature verification error:', e)
+      try {
+        recordEventSubWebhook({
+          receivedAt: Date.now(),
+          messageType: headers.messageType || 'notification',
+          messageId: headers.messageId || undefined,
+          timestamp: headers.timestamp || undefined,
+          signaturePresent: true,
+          signatureValid: false,
+          notes: 'Signature verification error',
+        })
+      } catch {}
       return NextResponse.json({ error: 'Signature verification failed' }, { status: 403 })
     }
     
@@ -276,6 +377,14 @@ async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
   try {
     // Fetch streamer's profile image from Twitch
     const profileImage = await getTwitchProfileImage(event.broadcaster_user_id)
+
+    // Cache reverse lookup (wallet -> Twitch profile) for market cards
+    await storeWalletStreamerProfile(streamerSession.walletAddress, {
+      twitchUserId: event.broadcaster_user_id,
+      twitchLogin: event.broadcaster_user_login,
+      twitchDisplayName: event.broadcaster_user_name,
+      profileImageUrl: profileImage,
+    })
     
     console.log(`Creating market with ${event.outcomes.length} outcomes, closes at ${new Date(locksAt * 1000).toISOString()}`)
     
@@ -296,6 +405,12 @@ async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
       marketId,
       state: 'active',
     })
+
+    // Store market-level outcomes (for list/card rendering)
+    // Best-effort: if KV fails, don't break webhook processing
+    try {
+      await storeMarketOutcomes(marketId, event.outcomes.map((o) => o.title))
+    } catch {}
     
     console.log(`✅ Prediction mapping updated with marketId ${marketId}`)
   } catch (error) {

@@ -14,8 +14,10 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { BarChart3, Clock, Droplets, Trophy } from "lucide-react";
-import { formatCompact, formatTimeRemaining } from "@/lib/formatters";
+import { formatCompact, formatPricePercent, formatTimeRemaining } from "@/lib/formatters";
+import { getOutcomeColor, sortBinaryOutcomes } from "@/lib/outcome-colors";
 import type { MarketData } from "@/lib/types";
 import { formatEther } from "viem";
 
@@ -28,20 +30,81 @@ interface MarketCardProps {
   onClick?: () => void;
 }
 
+function OutcomeRow({
+  title,
+  price,
+  color,
+}: {
+  title: string;
+  price: number;
+  color: string;
+}) {
+  const pct = Math.max(0, Math.min(100, price * 100));
+
+  return (
+    <div className="relative overflow-hidden rounded-lg bg-muted/30 px-3 py-2">
+      {/* Progress fill */}
+      <div
+        className="absolute inset-y-0 left-0"
+        style={{
+          width: `${pct}%`,
+          // Stronger fill that doesn't "die out" at 100%.
+          // Use color-mix so it also works with CSS variables (e.g. var(--chart-1)).
+          background: `linear-gradient(90deg,
+            color-mix(in srgb, ${color} 32%, transparent) 0%,
+            color-mix(in srgb, ${color} 18%, transparent) 70%,
+            color-mix(in srgb, ${color} 12%, transparent) 100%
+          )`,
+        }}
+        aria-hidden="true"
+      />
+
+      <div className="relative flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="h-2 w-2 rounded-full shrink-0"
+            style={{ backgroundColor: color }}
+            aria-hidden="true"
+          />
+          <span className="text-[13px] font-semibold leading-snug truncate">
+            {title}
+          </span>
+        </div>
+        <span className="text-sm font-semibold tabular-nums text-foreground">
+          {formatPricePercent(price, 0)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function MarketCard({ market, onClick }: MarketCardProps) {
   const [imageError, setImageError] = useState(false);
 
-  // Use onClick if provided (for Dialog), otherwise Link (for Page)
-  const Wrapper = ({ children }: { children: React.ReactNode }) => {
-    if (onClick) {
-      return <div onClick={onClick} className="cursor-pointer h-full">{children}</div>;
-    }
-    return <Link href={`/markets/${market.id}`} className="block h-full">{children}</Link>;
-  };
+  const isBinary = market.outcomeCount === 2;
+  const prices = market.prices;
 
-  return (
-    <Wrapper>
-      <Card className="group h-full flex flex-col overflow-hidden border border-border/50 bg-card py-0 gap-0 transition-all hover:border-primary/50 hover:shadow-lg dark:hover:shadow-primary/5 hover:-translate-y-1 duration-300">
+  const outcomeTitles =
+    market.outcomes && market.outcomes.length === market.outcomeCount
+      ? market.outcomes
+      : market.outcomeCount === 2
+        ? ["Yes", "No"]
+        : Array.from({ length: market.outcomeCount }).map((_, i) => `Option ${i + 1}`);
+
+  const outcomesForDisplay =
+    prices && prices.length === market.outcomeCount
+      ? outcomeTitles.map((title, idx) => ({
+          id: `outcome_${idx}`,
+          title,
+          price: prices[idx] ?? 0,
+        }))
+      : null;
+
+  const binaryOutcomes =
+    isBinary && outcomesForDisplay ? sortBinaryOutcomes(outcomesForDisplay) : null;
+
+  const card = (
+    <Card className="group h-full flex flex-col overflow-hidden border border-border/50 bg-card py-0 gap-0 transition-all hover:border-primary/50 hover:shadow-lg dark:hover:shadow-primary/5 hover:-translate-y-1 duration-300">
         {/* Cover Image Area */}
         <div className="relative h-40 w-full z-0">
           {/* Ambient Glow Effect */}
@@ -78,22 +141,97 @@ export function MarketCard({ market, onClick }: MarketCardProps) {
         </div>
 
         <CardContent className="flex flex-1 flex-col px-4 pt-3 pb-2 relative z-10 -mt-px bg-background/40 backdrop-blur-[2px]">
+          {/* Creator */}
+          {market.creator && (
+            <div className="mb-2 flex items-center gap-2">
+              <Avatar className="h-6 w-6 border border-border/60">
+                <AvatarImage src={market.creator.imageUrl} alt={market.creator.name} />
+                <AvatarFallback className="text-[10px]">
+                  {(market.creator.name || "S").slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              {market.creator.url ? (
+                <button
+                  type="button"
+                  className="text-left text-xs font-medium text-muted-foreground hover:text-foreground transition-colors truncate"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.open(market.creator!.url!, "_blank", "noreferrer");
+                  }}
+                >
+                  {market.creator.name}
+                </button>
+              ) : (
+                <span className="text-xs font-medium text-muted-foreground truncate">
+                  {market.creator.name}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Title */}
-          <div className="h-10 mb-2 flex items-center">
-            <h3 className="line-clamp-2 text-base font-bold leading-tight text-foreground group-hover:text-primary transition-colors">
+          <div className="mb-2">
+            <h3 className="line-clamp-2 text-lg font-semibold leading-snug tracking-tight text-foreground group-hover:text-primary transition-colors">
               {market.question}
             </h3>
           </div>
 
-          {/* Outcome Section Placeholder */}
-          <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-             {/* We don't have price data in the list view yet, so we show simple stats */}
-             <div className="flex gap-4">
+          {/* Outcome Section */}
+          <div className="flex-1">
+            {outcomesForDisplay ? (
+              <div className="mt-3 space-y-2">
+                {isBinary && binaryOutcomes ? (
+                  <>
+                    <OutcomeRow
+                      title={binaryOutcomes[0].title}
+                      price={binaryOutcomes[0].price}
+                      color={getOutcomeColor(binaryOutcomes[0].title, 0)}
+                    />
+                    <OutcomeRow
+                      title={binaryOutcomes[1].title}
+                      price={binaryOutcomes[1].price}
+                      color={getOutcomeColor(binaryOutcomes[1].title, 1)}
+                    />
+                  </>
+                ) : (
+                  (() => {
+                    const sorted = [...outcomesForDisplay].sort(
+                      (a, b) => b.price - a.price
+                    );
+                    const top = sorted.slice(0, 3);
+                    const remaining = Math.max(0, sorted.length - top.length);
+
+                    return (
+                      <>
+                        {top.map((o, idx) => (
+                          <OutcomeRow
+                            key={o.id}
+                            title={o.title}
+                            price={o.price}
+                            color={getOutcomeColor(o.title, idx)}
+                          />
+                        ))}
+                        {remaining > 0 && (
+                          <div className="px-1 text-xs text-muted-foreground">
+                            +{remaining} more outcome{remaining === 1 ? "" : "s"}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()
+                )}
+              </div>
+            ) : (
+              <div className="mt-4 flex items-center justify-center text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
-                    <Droplets className="w-4 h-4" />
-                    <span>Liq: {formatCompact(Number(formatEther(market.liquidity)), { prefix: '' })} ETH</span>
+                  <Droplets className="w-4 h-4" />
+                  <span>
+                    Liq: {formatCompact(Number(formatEther(market.liquidity)), { prefix: "" })} ETH
+                  </span>
                 </div>
-             </div>
+              </div>
+            )}
           </div>
 
           {/* Footer Stats */}
@@ -103,6 +241,10 @@ export function MarketCard({ market, onClick }: MarketCardProps) {
               <span className="text-foreground/80 tabular-nums flex items-center gap-1">
                 <Trophy className="w-3 h-3" />
                 {formatCompact(Number(formatEther(market.balance)), { prefix: '' })} Vol
+              </span>
+              <span className="text-muted-foreground tabular-nums hidden sm:flex items-center gap-1">
+                <Droplets className="w-3 h-3" />
+                {formatCompact(Number(formatEther(market.liquidity)), { prefix: '' })} Liq
               </span>
             </div>
 
@@ -114,6 +256,20 @@ export function MarketCard({ market, onClick }: MarketCardProps) {
           </div>
         </CardContent>
       </Card>
-    </Wrapper>
+  );
+
+  // Use onClick if provided (for Dialog), otherwise Link (for Page)
+  if (onClick) {
+    return (
+      <div onClick={onClick} className="cursor-pointer h-full">
+        {card}
+      </div>
+    );
+  }
+
+  return (
+    <Link href={`/markets/${market.id}`} className="block h-full">
+      {card}
+    </Link>
   );
 }

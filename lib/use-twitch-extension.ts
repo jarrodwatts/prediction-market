@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { getFriendlyErrorMessage } from '@/lib/errors'
 
 /**
  * Twitch Extension Helper Types
@@ -178,7 +179,7 @@ export function useTwitchExtension(): UseTwitchExtensionReturn {
       ext.onError((err) => {
         console.error('Twitch Extension error:', err)
         setIsError(true)
-        setError(err.message)
+        setError(getFriendlyErrorMessage(err, 'twitchExtension'))
       })
 
       // Handle configuration changes

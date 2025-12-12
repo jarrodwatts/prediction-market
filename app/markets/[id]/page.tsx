@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useReadContract, usePublicClient } from "wagmi";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, ChevronUp, ChevronDown } from "lucide-react";
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
 import { MarketHeader } from "@/components/market/market-header";
 import { OutcomeLegend } from "@/components/market/outcome-legend";
@@ -15,12 +15,14 @@ import { TradePanel } from "@/components/market/trade-panel";
 import { useQuery } from "@tanstack/react-query";
 import { MarketData } from "@/lib/types";
 import { parseAbiItem } from "viem";
+import { getOutcomeColor } from "@/lib/outcome-colors";
 
 export default function MarketDetailPage() {
   const params = useParams();
   const id = BigInt(params.id as string);
   const publicClient = usePublicClient();
   const [selectedOutcome, setSelectedOutcome] = useState(0);
+  const [outcomesExpanded, setOutcomesExpanded] = useState(true);
 
   const { data: market, isLoading, error } = useQuery({
     queryKey: ['market', id.toString()],
@@ -29,12 +31,22 @@ export default function MarketDetailPage() {
         if (!publicClient) throw new Error("No client");
 
         // Fetch market data from contract
-        const data = await publicClient.readContract({
+        const [data, pricesData] = await Promise.all([
+          publicClient.readContract({
             address: PREDICTION_MARKET_ADDRESS,
             abi: PREDICTION_MARKET_ABI,
             functionName: 'getMarketData',
             args: [id]
-        });
+          }),
+          publicClient
+            .readContract({
+              address: PREDICTION_MARKET_ADDRESS,
+              abi: PREDICTION_MARKET_ABI,
+              functionName: "getMarketPrices",
+              args: [id],
+            })
+            .catch(() => [0n, []] as any),
+        ]);
 
         // Fetch logs to get question and image
         // We filter logs for this specific market ID to find the creation event
@@ -77,6 +89,10 @@ export default function MarketDetailPage() {
 
         const block = await publicClient.getBlock({ blockNumber: creationLog.blockNumber });
 
+        const prices = Array.isArray(pricesData?.[1])
+          ? (pricesData[1] as bigint[]).map((p) => Number(p) / 1e18)
+          : undefined;
+
         // Calculate volume (buy + sell)
         // Action 0 = Buy, 1 = Sell
         const volume = actionLogs.reduce((acc, log) => {
@@ -100,7 +116,8 @@ export default function MarketDetailPage() {
             resolvedOutcomeId: data[5],
             outcomeCount: Number(creationLog.args.outcomes),
             createdAt: block.timestamp,
-            volume: volume
+            volume: volume,
+            prices,
         } as MarketData;
     },
     enabled: !!publicClient
@@ -123,6 +140,17 @@ export default function MarketDetailPage() {
     );
   }
 
+  const outcomeTitles =
+    market.outcomeCount === 2
+      ? ["Yes", "No"]
+      : Array.from({ length: market.outcomeCount }).map((_, i) => `Option ${i + 1}`);
+
+  const now = Date.now();
+  const closesAtMs = Number(market.closesAt) * 1000;
+  const isClosed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
+  const isResolved = market.state === 2;
+  const isReadOnly = isClosed || isResolved;
+
   return (
     <div className="mx-auto max-w-7xl px-6 py-6">
       {/* Back Link */}
@@ -137,15 +165,64 @@ export default function MarketDetailPage() {
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         {/* Left Column - Chart and Info */}
         <div className="space-y-6 min-w-0">
-          {/* Market Header */}
-          <MarketHeader market={market} />
-
-          {/* Outcome Legend */}
-          <OutcomeLegend outcomes={["Yes", "No"]} />
+          {/* Market Header + Legend (carded for cohesion) */}
+          <div className="rounded-xl border border-border bg-card p-4">
+            <MarketHeader market={market} />
+            <div className="mt-3">
+              <OutcomeLegend outcomes={outcomeTitles} />
+            </div>
+          </div>
 
           {/* Price Chart */}
           <div className="rounded-xl border border-border bg-card p-4">
             <PriceChart marketId={market.id} outcomeCount={market.outcomeCount} selectedOutcome={selectedOutcome} />
+          </div>
+
+          {/* Outcomes (Kalshi-style density under chart) */}
+          <div className="rounded-xl border border-border bg-card">
+            <button
+              onClick={() => setOutcomesExpanded(!outcomesExpanded)}
+              className="flex w-full items-center justify-between p-4 text-left"
+              type="button"
+            >
+              <span className="font-semibold">Outcomes</span>
+              {outcomesExpanded ? (
+                <ChevronUp className="h-5 w-5 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-5 w-5 text-muted-foreground" />
+              )}
+            </button>
+            {outcomesExpanded && (
+              <div className="divide-y divide-border border-t border-border">
+                {outcomeTitles.map((title, idx) => {
+                  const pct =
+                    market.prices && typeof market.prices[idx] === "number"
+                      ? Math.round(market.prices[idx]! * 100)
+                      : null;
+                  const dot = getOutcomeColor(title, idx);
+
+                  return (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between gap-4 p-4"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: dot }}
+                          aria-hidden="true"
+                        />
+                        <span className="font-medium truncate">{title}</span>
+                      </div>
+
+                      <div className="text-base font-semibold tabular-nums">
+                        {pct === null ? "—" : `${pct}%`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Rules Section */}
@@ -155,11 +232,25 @@ export default function MarketDetailPage() {
         </div>
 
         {/* Right Column - Trade Panel and Timeline */}
-        <div className="space-y-6 min-w-0 lg:sticky lg:top-20 lg:self-start">
-          <TradePanel market={market} selectedOutcome={selectedOutcome} onOutcomeChange={setSelectedOutcome} />
-
-          {/* Timeline Section */}
-          <MarketTimeline market={market} />
+        <div className="space-y-6 min-w-0 lg:sticky lg:top-20 lg:self-start" id="trade-panel">
+          {isReadOnly ? (
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <TradePanel
+                market={market}
+                selectedOutcome={selectedOutcome}
+                onOutcomeChange={setSelectedOutcome}
+                embedded
+              />
+              <div className="border-t border-border">
+                <MarketTimeline market={market} embedded defaultExpanded />
+              </div>
+            </div>
+          ) : (
+            <>
+              <TradePanel market={market} selectedOutcome={selectedOutcome} onOutcomeChange={setSelectedOutcome} />
+              <MarketTimeline market={market} />
+            </>
+          )}
         </div>
       </div>
     </div>

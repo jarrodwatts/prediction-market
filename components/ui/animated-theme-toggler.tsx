@@ -38,14 +38,38 @@ export const AnimatedThemeToggler = ({
   const toggleTheme = useCallback(async () => {
     if (!buttonRef.current) return
 
-    await document.startViewTransition(() => {
+    const apply = () => {
       flushSync(() => {
-        const newTheme = !isDark
-        setIsDark(newTheme)
+        const nextIsDark = !isDark
+        setIsDark(nextIsDark)
         document.documentElement.classList.toggle("dark")
-        localStorage.setItem("theme", newTheme ? "dark" : "light")
+        localStorage.setItem("theme", nextIsDark ? "dark" : "light")
       })
-    }).ready
+    }
+
+    // View Transitions API (Chrome/Edge). Fall back gracefully elsewhere.
+    // Important: bind to `document` to avoid "Illegal invocation".
+    type DocumentWithViewTransition = Document & {
+      startViewTransition?: (cb: () => void) => { ready: Promise<void> }
+    }
+
+    const startViewTransition: undefined | ((cb: () => void) => { ready: Promise<void> }) =
+      typeof document !== "undefined"
+        ? (document as DocumentWithViewTransition).startViewTransition?.bind(document)
+        : undefined
+
+    if (!startViewTransition) {
+      apply()
+      return
+    }
+
+    try {
+      await startViewTransition(apply).ready
+    } catch {
+      // If the API exists but fails (e.g. sandbox), still toggle theme.
+      apply()
+      return
+    }
 
     const { top, left, width, height } =
       buttonRef.current.getBoundingClientRect()
@@ -71,15 +95,25 @@ export const AnimatedThemeToggler = ({
     )
   }, [isDark, duration])
 
+  const ariaLabel = isDark
+    ? "Switch to light theme (currently dark)"
+    : "Switch to dark theme (currently light)"
+
   return (
     <button
       ref={buttonRef}
+      type="button"
       onClick={toggleTheme}
+      aria-label={ariaLabel}
+      aria-pressed={isDark}
       className={cn(className)}
       {...props}
     >
-      {isDark ? <Sun /> : <Moon />}
-      <span className="sr-only">Toggle theme</span>
+      {isDark ? (
+        <Sun className="size-4" aria-hidden="true" />
+      ) : (
+        <Moon className="size-4" aria-hidden="true" />
+      )}
     </button>
   )
 }

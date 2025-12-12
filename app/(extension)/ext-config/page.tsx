@@ -12,6 +12,7 @@ import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/ag
 import { useTwitchExtension } from '@/lib/use-twitch-extension'
 import { CheckCircle, Wallet, Twitch, ExternalLink, Loader2, AlertCircle, DollarSign, BarChart3, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { parseError } from '@/lib/errors'
 
 // API Base URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || ''
@@ -138,9 +139,11 @@ export default function ExtConfigPage() {
 
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
-    } catch (err: any) {
-      console.error('Error during setup:', err)
-      setError(err.message || 'Setup failed')
+    } catch (err: unknown) {
+      const parsed = parseError(err, 'streamerSetup')
+      setError(parsed.suggestion 
+        ? `${parsed.message} ${parsed.suggestion}`
+        : parsed.message)
     } finally {
       setIsSaving(false)
     }

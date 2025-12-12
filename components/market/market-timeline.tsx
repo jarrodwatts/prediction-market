@@ -14,6 +14,11 @@ import type { MarketData } from "@/lib/types";
 interface MarketTimelineProps {
   market: MarketData;
   defaultExpanded?: boolean;
+  /**
+   * When true, renders without its own card container.
+   * Useful for composing into a combined right-rail panel.
+   */
+  embedded?: boolean;
 }
 
 interface TimelineEvent {
@@ -96,6 +101,7 @@ function TimelineEventItem({ event }: TimelineEventItemProps) {
 export function MarketTimeline({
   market,
   defaultExpanded = true,
+  embedded = false,
 }: MarketTimelineProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [, forceUpdate] = useState(0);
@@ -115,7 +121,7 @@ export function MarketTimeline({
   const events = getTimelineEvents(market);
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <div className={embedded ? "" : "rounded-xl border border-border bg-card"}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex w-full items-center justify-between p-4 text-left"

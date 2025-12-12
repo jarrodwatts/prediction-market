@@ -18,9 +18,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, DollarSign, Wallet, Droplets, Coins, ArrowDownToLine, Lock } from "lucide-react";
-import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useSendCalls, useCallsStatus } from "wagmi";
+import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useSendCalls, useCallsStatus, usePublicClient } from "wagmi";
 import { useQueryClient } from "@tanstack/react-query";
-import { parseUnits, formatUnits, encodeFunctionData } from "viem";
+import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionData, parseAbiItem } from "viem";
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
 import { abstractTestnet } from "@/lib/wagmi";
 import { calcBuyAmount, calcSellAmount, getPrice } from "@/lib/market-math";
@@ -29,6 +29,7 @@ import { getOutcomeColor, getOutcomeClasses } from "@/lib/outcome-colors";
 import { formatShares } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useTransactionToast } from "@/lib/use-transaction-toast";
+import { useQuery } from "@tanstack/react-query";
 
 // USDC configuration
 const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`;
@@ -69,6 +70,11 @@ interface TradePanelProps {
   market: MarketData;
   selectedOutcome: number;
   onOutcomeChange: (outcome: number) => void;
+  /**
+   * When true, renders without its own outer card shell.
+   * Useful for composing into a combined right-rail panel.
+   */
+  embedded?: boolean;
 }
 
 type TabType = "buy" | "sell" | "liquidity";
@@ -83,7 +89,22 @@ function parseUSDC(value: string): bigint {
   return parseUnits(value, USDC_DECIMALS);
 }
 
-export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePanelProps) {
+// Note: Error parsing is now handled by lib/errors.ts
+// We pass the raw error to txToast.showError which parses it for user-friendly display
+
+function toBigIntSafe(v: unknown): bigint {
+  if (typeof v === "bigint") return v;
+  if (typeof v === "number") return BigInt(Math.trunc(v));
+  if (typeof v === "string" && v.trim() !== "") return BigInt(v);
+  return 0n;
+}
+
+export function TradePanel({
+  market,
+  selectedOutcome,
+  onOutcomeChange,
+  embedded = false,
+}: TradePanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("buy");
   const [liquidityTab, setLiquidityTab] = useState<"add" | "remove">("add");
   
@@ -97,6 +118,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   const handledHashRef = useRef<string | null>(null);
   const handledBatchIdRef = useRef<string | null>(null);
   const { address, isConnected } = useAccount();
+  const publicClient = usePublicClient();
   const queryClient = useQueryClient();
   const { writeContract, data: hash, isPending: isWritePending, error: writeError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
@@ -261,7 +283,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
       if (writeError && writeError !== handledWriteErrorRef.current) {
           handledWriteErrorRef.current = writeError;
           if (pendingTxType) {
-            txToast.showError(pendingTxType, writeError.message);
+            txToast.showError(pendingTxType, writeError);
             setPendingTxType(null);
           }
       }
@@ -271,7 +293,7 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
       if (batchError && batchError !== handledBatchErrorRef.current) {
           handledBatchErrorRef.current = batchError;
           if (pendingTxType) {
-            txToast.showError(pendingTxType, batchError.message);
+            txToast.showError(pendingTxType, batchError);
             setPendingTxType(null);
           }
       }
@@ -351,8 +373,8 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
         functionName: 'approve',
         args: [PREDICTION_MARKET_ADDRESS, BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")]
       });
-    } catch (e: any) {
-      txToast.showError("approve", e.message);
+    } catch (e: unknown) {
+      txToast.showError("approve", e);
       setPendingTxType(null);
     }
   };
@@ -396,8 +418,8 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                 args: [market.id, BigInt(selectedOutcome), 0n, amountBigInt]
             });
           }
-      } catch (e: any) {
-          txToast.showError("buy", e.message);
+      } catch (e: unknown) {
+          txToast.showError("buy", e);
           setPendingTxType(null);
       }
   };
@@ -417,8 +439,8 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                functionName: 'sell',
                args: [market.id, BigInt(selectedOutcome), sharesAmount, BigInt("999999999999999999999999")]
            });
-      } catch (e: any) {
-          txToast.showError("sell", e.message);
+      } catch (e: unknown) {
+          txToast.showError("sell", e);
           setPendingTxType(null);
       }
   };
@@ -462,8 +484,8 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                 args: [market.id, amountBigInt]
             });
           }
-      } catch (e: any) {
-          txToast.showError("addLiquidity", e.message);
+      } catch (e: unknown) {
+          txToast.showError("addLiquidity", e);
           setPendingTxType(null);
       }
   };
@@ -497,8 +519,8 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
               functionName: 'removeLiquidity',
               args: [market.id, sharesAmount]
           });
-      } catch (e: any) {
-          txToast.showError("removeLiquidity", e.message);
+      } catch (e: unknown) {
+          txToast.showError("removeLiquidity", e);
           setPendingTxType(null);
       }
   };
@@ -514,8 +536,8 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
               functionName: 'claimFees',
               args: [market.id]
           });
-      } catch (e: any) {
-          txToast.showError("claimFees", e.message);
+      } catch (e: unknown) {
+          txToast.showError("claimFees", e);
           setPendingTxType(null);
       }
   };
@@ -531,8 +553,8 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
               functionName: 'claimLiquidity',
               args: [market.id]
           });
-      } catch (e: any) {
-          txToast.showError("claimLiquidity", e.message);
+      } catch (e: unknown) {
+          txToast.showError("claimLiquidity", e);
           setPendingTxType(null);
       }
   };
@@ -557,6 +579,135 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
   const hasWinningShares = isResolved && userOutcomeShares[resolvedOutcomeId] > 0n;
   const winningOutcomeName = isResolved ? (resolvedOutcomeId === 0 ? "Yes" : "No") : "";
 
+  // ---- Resolved P&L (story card) ----
+  const winningsToClaim = claimStatus ? (claimStatus[0] ?? false) : false;
+  const winningsClaimed = claimStatus ? (claimStatus[1] ?? false) : false;
+  const claimableWinnings = useMemo(() => {
+    if (!isResolved) return 0n;
+    if (!winningsToClaim || winningsClaimed) return 0n;
+    return userOutcomeShares[resolvedOutcomeId] ?? 0n;
+  }, [isResolved, winningsToClaim, winningsClaimed, userOutcomeShares, resolvedOutcomeId]);
+
+  const { data: userCashflow } = useQuery({
+    queryKey: ["user-market-cashflow", market.id.toString(), address?.toLowerCase() ?? ""],
+    enabled: !!publicClient && isConnected && !!address && (isClosed || isResolved),
+    queryFn: async () => {
+      if (!publicClient || !address) {
+        return { buyOut: 0n, sellIn: 0n, winningsIn: 0n };
+      }
+
+      const event = parseAbiItem(
+        "event MarketActionTx(address indexed user, uint8 indexed action, uint256 indexed marketId, uint256 outcomeId, uint256 shares, uint256 value, uint256 timestamp)"
+      );
+
+      type MarketActionTxLog = {
+        args?: {
+          user?: string;
+          action?: bigint | number;
+          value?: bigint;
+        };
+        transactionHash?: `0x${string}`;
+      };
+
+      let logs: MarketActionTxLog[] = [];
+      try {
+        // Try indexed filtering first (fast path)
+        logs = await publicClient.getLogs({
+          address: PREDICTION_MARKET_ADDRESS,
+          event,
+          args: { user: address, marketId: market.id },
+          fromBlock: "earliest",
+        });
+      } catch {
+        // Fallback: fetch by marketId only, then filter locally
+        const marketLogs = await publicClient.getLogs({
+          address: PREDICTION_MARKET_ADDRESS,
+          event,
+          args: { marketId: market.id },
+          fromBlock: "earliest",
+        });
+        const addr = address.toLowerCase();
+        logs = marketLogs.filter((l) => String(l.args?.user ?? "").toLowerCase() === addr);
+      }
+
+      let buyOut = 0n;
+      let sellIn = 0n;
+      let winningsIn = 0n;
+
+      for (const log of logs) {
+        const action = Number(log.args?.action ?? -1);
+        const value = log.args?.value ?? 0n;
+
+        // 0 = buy (gross paid)
+        if (action === 0) {
+          buyOut += value;
+          continue;
+        }
+
+        // 4 = claimWinnings (exact received)
+        if (action === 4) {
+          winningsIn += value;
+          continue;
+        }
+
+        // 1 = sell (event value includes fees; decode tx input for net received)
+        if (action === 1) {
+          const txHash = log.transactionHash;
+          if (!txHash) {
+            sellIn += value;
+            continue;
+          }
+          try {
+            const tx = await publicClient.getTransaction({ hash: txHash });
+            const decoded = decodeFunctionData({
+              abi: PREDICTION_MARKET_ABI,
+              data: tx.input,
+            });
+
+            // sell(marketId, outcomeId, value, maxOutcomeSharesToSell)
+            // referralSell(marketId, outcomeId, value, maxOutcomeSharesToSell, code)
+            // sellToETH/referralSellToETH have same positional `value` argument
+            const fn = decoded.functionName;
+            if (
+              fn === "sell" ||
+              fn === "sellToETH" ||
+              fn === "referralSell" ||
+              fn === "referralSellToETH"
+            ) {
+              const args = decoded.args as readonly unknown[] | undefined;
+              const netValue = toBigIntSafe(args?.[2]);
+              sellIn += netValue;
+            } else {
+              // Fallback to event value (may overstate due to fees)
+              sellIn += value;
+            }
+          } catch {
+            // If we can't decode, fallback to event value
+            sellIn += value;
+          }
+          continue;
+        }
+      }
+
+      return { buyOut, sellIn, winningsIn };
+    },
+    staleTime: 20_000,
+    refetchInterval: isResolved ? 0 : 10_000,
+  });
+
+  const formatMoney = (v: bigint) => `$${parseFloat(formatUnits(v, USDC_DECIMALS)).toFixed(2)}`;
+  const netReceivedInclClaimable = (userCashflow?.sellIn ?? 0n) + (userCashflow?.winningsIn ?? 0n) + claimableWinnings;
+  const netSpent = userCashflow?.buyOut ?? 0n;
+  const netPnl = netReceivedInclClaimable - netSpent;
+  const absPnl = netPnl < 0n ? -netPnl : netPnl;
+  const pnlTone =
+    netPnl > 0n ? "win" : netPnl < 0n ? "loss" : "even";
+  const showPnlStory =
+    isResolved &&
+    (netSpent > 0n ||
+      netReceivedInclClaimable > 0n ||
+      userOutcomeShares.some((s) => s > 0n));
+
   const handleClaimWinnings = () => {
     setPendingTxType("claimWinnings");
     txToast.showPending("claimWinnings");
@@ -568,15 +719,17 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
             functionName: 'claimWinnings',
             args: [market.id]
         });
-    } catch (e: any) {
-        txToast.showError("claimWinnings", e.message);
+    } catch (e: unknown) {
+        txToast.showError("claimWinnings", e);
         setPendingTxType(null);
     }
   };
 
   if (isClosed || isResolved) {
     return (
-        <div className="border border-border rounded-xl bg-card overflow-hidden">
+        <div className={cn(
+            embedded ? "" : "border border-border rounded-xl bg-card overflow-hidden"
+        )}>
             {/* Status Header - matches tab header style */}
             <div className="border-b border-border bg-transparent p-4">
                 <div className="flex items-center gap-2">
@@ -608,108 +761,154 @@ export function TradePanel({ market, selectedOutcome, onOutcomeChange }: TradePa
                             : "Prediction period closed, awaiting final outcome."}
                     </p>
 
-                    {/* User Position Summary */}
-                    {(userLiquidity > 0n || userClaimableFees > 0n || userOutcomeShares.some(s => s > 0n)) && (
-                        <>
-                            <div className="rounded-lg border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                        Your positions
+                    {/* Resolved P&L story */}
+                    {showPnlStory && (
+                        <div className={cn(
+                            "rounded-lg border px-3 sm:px-4 py-3 sm:py-4",
+                            pnlTone === "win" && "border-emerald-500/25 bg-linear-to-br from-emerald-500/10 via-transparent to-emerald-500/15",
+                            pnlTone === "loss" && "border-red-500/25 bg-linear-to-br from-red-500/10 via-transparent to-red-500/15",
+                            pnlTone === "even" && "border-border/60 bg-muted/10"
+                        )}>
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="space-y-1">
+                                    <div className={cn(
+                                        "text-sm font-semibold",
+                                        pnlTone === "win" && "text-emerald-500",
+                                        pnlTone === "loss" && "text-red-500"
+                                    )}>
+                                        {pnlTone === "win" ? "You won" : pnlTone === "loss" ? "You lost" : "You broke even"}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        Resolved to <span className="font-medium text-foreground">{winningOutcomeName}</span>.
+                                        {claimableWinnings > 0n ? " (Includes unclaimed winnings)" : ""}
+                                    </div>
+                                </div>
+                                <div className={cn(
+                                    "text-right font-mono text-2xl font-bold leading-none tabular-nums",
+                                    pnlTone === "win" && "text-emerald-500",
+                                    pnlTone === "loss" && "text-red-500",
+                                    pnlTone === "even" && "text-foreground"
+                                )}>
+                                    {pnlTone === "loss" ? "-" : pnlTone === "win" ? "+" : ""}
+                                    {formatMoney(absPnl)}
+                                </div>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:text-sm">
+                                <div className="flex items-center justify-between rounded-md border border-border/50 bg-background/40 px-2.5 py-2 text-muted-foreground">
+                                    <span>Spent</span>
+                                    <span className="font-mono text-foreground">{formatMoney(netSpent)}</span>
+                                </div>
+                                <div className="flex items-center justify-between rounded-md border border-border/50 bg-background/40 px-2.5 py-2 text-muted-foreground">
+                                    <span>Received</span>
+                                    <span className="font-mono text-foreground">{formatMoney(netReceivedInclClaimable)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* User Position Summary - only show if NOT showing P&L story, or if user has liquidity/fees */}
+                    {/* When P&L story is shown, positions are redundant since spent/received is already displayed */}
+                    {!showPnlStory && (hasYesPosition || hasNoPosition) && (
+                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                    Your positions
+                                </span>
+                            </div>
+                            
+                            {/* Yes/No Shares cards */}
+                            <div className={cn(
+                                "gap-2",
+                                hasYesPosition && hasNoPosition ? "grid grid-cols-2" : "grid grid-cols-1"
+                            )}>
+                                {hasYesPosition && (
+                                    <div className="relative overflow-hidden rounded-lg border border-emerald-500/25 px-3 py-2.5 bg-linear-to-br from-emerald-500/8 via-transparent to-emerald-500/15">
+                                        <div className="absolute inset-0 bg-linear-to-t from-emerald-500/10 to-transparent opacity-60" />
+                                        <div className="relative flex items-center justify-between">
+                                            <span className="text-xs text-muted-foreground">Yes</span>
+                                            <span className="text-base font-mono font-semibold text-emerald-500">
+                                                ${parseFloat(formatUnits(yesShares, USDC_DECIMALS)).toFixed(2)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                                {hasNoPosition && (
+                                    <div className="relative overflow-hidden rounded-lg border border-red-500/25 px-3 py-2.5 bg-linear-to-br from-red-500/8 via-transparent to-red-500/15">
+                                        <div className="absolute inset-0 bg-linear-to-t from-red-500/10 to-transparent opacity-60" />
+                                        <div className="relative flex items-center justify-between">
+                                            <span className="text-xs text-muted-foreground">No</span>
+                                            <span className="text-base font-mono font-semibold text-red-500">
+                                                ${parseFloat(formatUnits(noShares, USDC_DECIMALS)).toFixed(2)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Liquidity & Fees - show separately when user has LP position */}
+                    {(userLiquidity > 0n || userClaimableFees > 0n) && (
+                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-1.5 text-xs sm:text-sm">
+                            {userLiquidity > 0n && (
+                                <div className="flex justify-between text-muted-foreground">
+                                    <span>Liquidity</span>
+                                    <span className="text-foreground font-mono">
+                                        ${parseFloat(formatUnits(userLiquidity, USDC_DECIMALS)).toFixed(2)}
                                     </span>
                                 </div>
-                                
-                                {/* Yes/No Shares cards */}
-                                {(hasYesPosition || hasNoPosition) && (
-                                    <div className={cn(
-                                        "gap-2",
-                                        hasYesPosition && hasNoPosition ? "grid grid-cols-2" : "grid grid-cols-1"
-                                    )}>
-                                        {hasYesPosition && (
-                                            <div className="relative overflow-hidden rounded-lg border border-emerald-500/25 px-3 py-2.5 bg-linear-to-br from-emerald-500/8 via-transparent to-emerald-500/15">
-                                                <div className="absolute inset-0 bg-linear-to-t from-emerald-500/10 to-transparent opacity-60" />
-                                                <div className="relative flex items-center justify-between">
-                                                    <span className="text-xs text-muted-foreground">Yes</span>
-                                                    <span className="text-base font-mono font-semibold text-emerald-500">
-                                                        ${parseFloat(formatUnits(yesShares, USDC_DECIMALS)).toFixed(2)}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {hasNoPosition && (
-                                            <div className="relative overflow-hidden rounded-lg border border-red-500/25 px-3 py-2.5 bg-linear-to-br from-red-500/8 via-transparent to-red-500/15">
-                                                <div className="absolute inset-0 bg-linear-to-t from-red-500/10 to-transparent opacity-60" />
-                                                <div className="relative flex items-center justify-between">
-                                                    <span className="text-xs text-muted-foreground">No</span>
-                                                    <span className="text-base font-mono font-semibold text-red-500">
-                                                        ${parseFloat(formatUnits(noShares, USDC_DECIMALS)).toFixed(2)}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                            )}
+                            {userClaimableFees > 0n && (
+                                <div className="flex justify-between text-muted-foreground">
+                                    <span>Fees earned</span>
+                                    <span className="text-emerald-500 font-mono">
+                                        ${parseFloat(formatUSDC(userClaimableFees)).toFixed(2)}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
-                                {/* Liquidity & Fees */}
-                                {(userLiquidity > 0n || userClaimableFees > 0n) && (
-                                    <div className="space-y-1.5 text-xs sm:text-sm">
-                                        {userLiquidity > 0n && (
-                                            <div className="flex justify-between text-muted-foreground">
-                                                <span>Liquidity</span>
-                                                <span className="text-foreground font-mono">
-                                                    ${parseFloat(formatUnits(userLiquidity, USDC_DECIMALS)).toFixed(2)}
-                                                </span>
-                                            </div>
-                                        )}
-                                        {userClaimableFees > 0n && (
-                                            <div className="flex justify-between text-muted-foreground">
-                                                <span>Fees earned</span>
-                                                <span className="text-emerald-500 font-mono">
-                                                    ${parseFloat(formatUSDC(userClaimableFees)).toFixed(2)}
-                                                </span>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
+                    {/* Actions - always show when user has something to claim */}
+                    {(hasWinningShares || userClaimableFees > 0n || (isResolved && userLiquidity > 0n)) && (
 
-                            {/* Actions */}
-                            <div className="space-y-2">
-                                {hasWinningShares && (
-                                    <Button 
-                                        onClick={handleClaimWinnings}
-                                        disabled={isLoading}
-                                        className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
-                                    >
-                                        {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
-                                        Claim Winnings
-                                    </Button>
-                                )}
-                                
-                                {userClaimableFees > 0n && (
-                                    <Button 
-                                        variant="outline"
-                                        onClick={handleClaimFees}
-                                        disabled={isLoading}
-                                        className="w-full"
-                                    >
-                                        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Coins className="mr-2 h-4 w-4" />}
-                                        Claim Fees
-                                    </Button>
-                                )}
-                                
-                                {isResolved && userLiquidity > 0n && (
-                                    <Button 
-                                        variant="outline"
-                                        onClick={handleClaimLiquidity}
-                                        disabled={isLoading}
-                                        className="w-full"
-                                    >
-                                        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowDownToLine className="mr-2 h-4 w-4" />}
-                                        Claim Liquidity
-                                    </Button>
-                                )}
-                            </div>
-                        </>
+                        <div className="space-y-2">
+                            {hasWinningShares && (
+                                <Button 
+                                    onClick={handleClaimWinnings}
+                                    disabled={isLoading}
+                                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
+                                >
+                                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
+                                    Claim Winnings
+                                </Button>
+                            )}
+                            
+                            {userClaimableFees > 0n && (
+                                <Button 
+                                    variant="outline"
+                                    onClick={handleClaimFees}
+                                    disabled={isLoading}
+                                    className="w-full"
+                                >
+                                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Coins className="mr-2 h-4 w-4" />}
+                                    Claim Fees
+                                </Button>
+                            )}
+                            
+                            {isResolved && userLiquidity > 0n && (
+                                <Button 
+                                    variant="outline"
+                                    onClick={handleClaimLiquidity}
+                                    disabled={isLoading}
+                                    className="w-full"
+                                >
+                                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowDownToLine className="mr-2 h-4 w-4" />}
+                                    Claim Liquidity
+                                </Button>
+                            )}
+                        </div>
                     )}
 
                     {/* No position message */}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { storeStreamerSession, getStreamerSession } from '@/lib/kv'
+import { storeStreamerSession, getStreamerSession, storeWalletStreamerProfile } from '@/lib/kv'
 import { subscribeToChannelPredictions } from '@/lib/twitch/eventsub'
 import { auth } from '@/lib/auth'
 
@@ -24,6 +24,17 @@ export async function POST(request: NextRequest) {
       refreshToken: existingSession?.refreshToken || '',
       walletAddress,
       expiresAt: existingSession?.expiresAt || 0,
+      twitchLogin: existingSession?.twitchLogin,
+      twitchDisplayName: existingSession?.twitchDisplayName,
+      profileImageUrl: existingSession?.profileImageUrl,
+    })
+
+    // Also store reverse lookup so the UI can show the streamer on cards
+    await storeWalletStreamerProfile(walletAddress, {
+      twitchUserId: channelId,
+      twitchLogin: existingSession?.twitchLogin,
+      twitchDisplayName: existingSession?.twitchDisplayName,
+      profileImageUrl: existingSession?.profileImageUrl,
     })
 
     return NextResponse.json({ success: true })

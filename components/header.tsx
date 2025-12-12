@@ -2,52 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Github, TrendingUp, Wallet, LogOut, Loader2 } from "lucide-react";
-import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react';
-import { Button } from "@/components/ui/button";
-
-function WalletButton() {
-  const { login, logout } = useLoginWithAbstract();
-  const { data: abstractClient, isLoading } = useAbstractClient();
-  const [address, setAddress] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (abstractClient) {
-      abstractClient.account.address && setAddress(abstractClient.account.address);
-    } else {
-      setAddress(null);
-    }
-  }, [abstractClient]);
-
-  if (isLoading) {
-    return (
-      <Button variant="outline" size="sm" disabled>
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        Loading...
-      </Button>
-    );
-  }
-
-  if (address) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground font-mono">
-          {address.slice(0, 6)}...{address.slice(-4)}
-        </span>
-        <Button variant="ghost" size="sm" onClick={() => logout()}>
-          <LogOut className="h-4 w-4" />
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <Button variant="default" size="sm" onClick={() => login()}>
-      <Wallet className="mr-2 h-4 w-4" />
-      Connect
-    </Button>
-  );
-}
+import { Github, TrendingUp } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import { ConnectWalletButton } from "@/components/connect-wallet-button";
+import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
+import { cn } from "@/lib/utils";
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -74,17 +33,27 @@ export function Header() {
         </Link>
 
         {/* Right: Nav */}
-        <nav className="flex items-center gap-4">
+        <nav className="flex items-center gap-2">
           <a
             href="https://github.com/jarrodwatts/prediction-market"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center h-9 w-9 rounded-lg text-muted-foreground transition-colors hover:text-foreground"
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon" }),
+              "text-muted-foreground hover:text-foreground"
+            )}
             aria-label="GitHub"
           >
             <Github className="size-4" />
           </a>
-          <WalletButton />
+          <AnimatedThemeToggler
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon" }),
+              "text-muted-foreground hover:text-foreground"
+            )}
+          />
+          <div className="mx-1 h-6 w-px bg-border/70" aria-hidden="true" />
+          <ConnectWalletButton mode="header" />
         </nav>
       </div>
     </header>
