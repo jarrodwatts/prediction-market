@@ -35,10 +35,10 @@ export default async function RootLayout({
   const pathname = headersList.get("x-pathname") || headersList.get("x-invoke-path") || "";
   const isExtensionRoute = pathname.includes("/overlay") || pathname.includes("/ext-config");
 
-  // Extension routes get a minimal transparent layout
+  // Extension routes get a minimal layout optimized for Video Component
   if (isExtensionRoute) {
     return (
-      <html lang="en" className="dark">
+      <html lang="en" className="dark h-full">
         <head>
           {/* Twitch Extension Helper - Required for all Twitch extensions */}
           <script 
@@ -46,9 +46,11 @@ export default async function RootLayout({
             // @ts-ignore - strategy not needed for regular script tag
           />
         </head>
-        <body className={`${geistSans.variable} ${geistMono.variable} bg-transparent text-foreground antialiased`}>
+        <body className={`${geistSans.variable} ${geistMono.variable} h-full bg-card text-foreground antialiased`}>
           <Providers>
-            {children}
+            <div className="h-full">
+              {children}
+            </div>
           </Providers>
         </body>
       </html>

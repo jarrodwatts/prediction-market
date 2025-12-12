@@ -329,11 +329,12 @@ export function TradePanel({
   const userLiquidity = userShares ? (userShares[0] ?? 0n) : 0n;
   const userClaimableFees = claimableFees ?? 0n;
 
-  // Simple helpers for closed-panel layout
-  const yesShares = userOutcomeShares[0] ?? 0n;
-  const noShares = userOutcomeShares[1] ?? 0n;
-  const hasYesPosition = yesShares > 0n;
-  const hasNoPosition = noShares > 0n;
+  // Check if user has any position across all outcomes
+  const hasAnyPosition = userOutcomeShares.some(s => s > 0n);
+  // Get indices of outcomes where user has a position
+  const positionIndices = userOutcomeShares
+    .map((shares, idx) => ({ shares, idx }))
+    .filter(({ shares }) => shares > 0n);
   
   // Claim status flags
   const canClaimLiquidity = claimStatus ? claimStatus[2] && !claimStatus[3] : false;
@@ -361,6 +362,9 @@ export function TradePanel({
       );
   }, [market.outcomeCount, outcomeShares, liquidity]);
 
+  // Check if prices are actually loaded (not just defaults)
+  const pricesLoaded = outcomeShares.length > 0 && liquidity > 0n;
+
   // --- Handlers ---
   const handleApprove = () => {
     setPendingTxType("approve");
@@ -383,7 +387,7 @@ export function TradePanel({
       if (!amount) return;
       
       setPendingTxType("buy");
-      txToast.showPending("buy", `Buying ${selectedOutcome === 0 ? "Yes" : "No"} shares for $${amount}`);
+      txToast.showPending("buy", `Buying ${outcomeTitles[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`} shares for $${amount}`);
       
       try {
           const amountBigInt = parseUSDC(amount);
@@ -428,7 +432,7 @@ export function TradePanel({
       if (!sharesToSell) return;
       
       setPendingTxType("sell");
-      txToast.showPending("sell", `Selling ${sharesToSell} ${selectedOutcome === 0 ? "Yes" : "No"} shares`);
+      txToast.showPending("sell", `Selling ${sharesToSell} ${outcomeTitles[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`} shares`);
       
       try {
            // Shares are in 18 decimals
@@ -576,8 +580,27 @@ export function TradePanel({
   const isResolved = market.state === 2;
   
   const resolvedOutcomeId = Number(market.resolvedOutcomeId);
-  const hasWinningShares = isResolved && userOutcomeShares[resolvedOutcomeId] > 0n;
-  const winningOutcomeName = isResolved ? (resolvedOutcomeId === 0 ? "Yes" : "No") : "";
+  // A market is voided when resolvedOutcomeId is -1 (contract uses int256) or >= outcomeCount
+  const isVoided = isResolved && (resolvedOutcomeId < 0 || resolvedOutcomeId >= market.outcomeCount);
+  const hasWinningShares = isResolved && !isVoided && userOutcomeShares[resolvedOutcomeId] > 0n;
+  // For voided markets, check if user has any shares to reclaim
+  const hasVoidedShares = isVoided && userOutcomeShares.some(s => s > 0n);
+  
+  // Get outcome titles - use actual names from market data if available
+  const outcomeTitles = market.outcomes && market.outcomes.length === market.outcomeCount
+    ? market.outcomes
+    : market.outcomeCount === 2
+      ? ["Yes", "No"]
+      : Array.from({ length: market.outcomeCount }).map((_, i) => `Option ${i + 1}`);
+
+  // Pre-sorted outcomes by likelihood (only compute when prices are loaded)
+  const sortedOutcomes = useMemo(() => {
+      return outcomeTitles
+          .map((title, idx) => ({ title, idx, price: outcomePrices[idx] ?? 0 }))
+          .sort((a, b) => b.price - a.price);
+  }, [outcomeTitles, outcomePrices]);
+  
+  const winningOutcomeName = isResolved && !isVoided ? (outcomeTitles[resolvedOutcomeId] ?? "Unknown") : "";
 
   // ---- Resolved P&L (story card) ----
   const winningsToClaim = claimStatus ? (claimStatus[0] ?? false) : false;
@@ -725,6 +748,28 @@ export function TradePanel({
     }
   };
 
+  // For voided markets, claim each outcome's shares
+  const handleClaimVoided = () => {
+    // Find the first outcome with shares to claim
+    const outcomeIdx = userOutcomeShares.findIndex(s => s > 0n);
+    if (outcomeIdx === -1) return;
+    
+    setPendingTxType("claimWinnings"); // Reuse the same toast type
+    txToast.showPending("claimWinnings", "Reclaiming your funds...");
+    
+    try {
+        writeContract({
+            address: PREDICTION_MARKET_ADDRESS,
+            abi: PREDICTION_MARKET_ABI,
+            functionName: 'claimVoidedOutcomeShares',
+            args: [market.id, BigInt(outcomeIdx)]
+        });
+    } catch (e: unknown) {
+        txToast.showError("claimWinnings", e);
+        setPendingTxType(null);
+    }
+  };
+
   if (isClosed || isResolved) {
     return (
         <div className={cn(
@@ -734,14 +779,18 @@ export function TradePanel({
             <div className="border-b border-border bg-transparent p-4">
                 <div className="flex items-center gap-2">
                     {isResolved ? (
-                        <Coins className="w-4 h-4 text-yellow-500" />
+                        isVoided ? (
+                            <Lock className="w-4 h-4 text-muted-foreground" />
+                        ) : (
+                            <Coins className="w-4 h-4 text-yellow-500" />
+                        )
                     ) : (
                         <Lock className="w-4 h-4 text-muted-foreground" />
                     )}
                     <span className="font-medium">
-                        {isResolved ? "Market Resolved" : "Market Closed"}
+                        {isVoided ? "Market Canceled" : isResolved ? "Market Resolved" : "Market Closed"}
                     </span>
-                    {isResolved && (
+                    {isResolved && !isVoided && (
                         <span className={cn(
                             "ml-auto text-sm font-semibold", 
                             resolvedOutcomeId === 0 ? "text-emerald-500" : "text-red-500"
@@ -756,13 +805,15 @@ export function TradePanel({
                 <div className="space-y-3">
                     {/* Status message */}
                     <p className="text-sm text-muted-foreground">
-                        {isResolved 
-                            ? "This market has been finalized." 
-                            : "Prediction period closed, awaiting final outcome."}
+                        {isVoided 
+                            ? "This prediction was canceled. You can reclaim your original investment."
+                            : isResolved 
+                                ? "This market has been finalized." 
+                                : "Prediction period closed, awaiting final outcome."}
                     </p>
 
-                    {/* Resolved P&L story */}
-                    {showPnlStory && (
+                    {/* Resolved P&L story (skip for voided - show simpler UI) */}
+                    {showPnlStory && !isVoided && (
                         <div className={cn(
                             "rounded-lg border px-3 sm:px-4 py-3 sm:py-4",
                             pnlTone === "win" && "border-emerald-500/25 bg-linear-to-br from-emerald-500/10 via-transparent to-emerald-500/15",
@@ -809,7 +860,7 @@ export function TradePanel({
 
                     {/* User Position Summary - only show if NOT showing P&L story, or if user has liquidity/fees */}
                     {/* When P&L story is shown, positions are redundant since spent/received is already displayed */}
-                    {!showPnlStory && (hasYesPosition || hasNoPosition) && (
+                    {!showPnlStory && hasAnyPosition && (
                         <div className="rounded-lg border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3">
                             <div className="flex items-center justify-between">
                                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -817,33 +868,40 @@ export function TradePanel({
                                 </span>
                             </div>
                             
-                            {/* Yes/No Shares cards */}
+                            {/* Outcome Shares cards */}
                             <div className={cn(
                                 "gap-2",
-                                hasYesPosition && hasNoPosition ? "grid grid-cols-2" : "grid grid-cols-1"
+                                positionIndices.length > 1 ? "grid grid-cols-2" : "grid grid-cols-1"
                             )}>
-                                {hasYesPosition && (
-                                    <div className="relative overflow-hidden rounded-lg border border-emerald-500/25 px-3 py-2.5 bg-linear-to-br from-emerald-500/8 via-transparent to-emerald-500/15">
-                                        <div className="absolute inset-0 bg-linear-to-t from-emerald-500/10 to-transparent opacity-60" />
-                                        <div className="relative flex items-center justify-between">
-                                            <span className="text-xs text-muted-foreground">Yes</span>
-                                            <span className="text-base font-mono font-semibold text-emerald-500">
-                                                ${parseFloat(formatUnits(yesShares, USDC_DECIMALS)).toFixed(2)}
-                                            </span>
+                                {positionIndices.map(({ shares, idx }) => {
+                                    const title = outcomeTitles[idx] ?? `Outcome ${idx + 1}`;
+                                    const baseColor = getOutcomeColor(title, idx);
+                                    return (
+                                        <div 
+                                            key={idx}
+                                            className="relative overflow-hidden rounded-lg px-3 py-2.5"
+                                            style={{
+                                                borderColor: `${baseColor}40`,
+                                                borderWidth: '1px',
+                                                background: `linear-gradient(to bottom right, ${baseColor}15, transparent, ${baseColor}20)`
+                                            }}
+                                        >
+                                            <div 
+                                                className="absolute inset-0 opacity-60" 
+                                                style={{ background: `linear-gradient(to top, ${baseColor}15, transparent)` }}
+                                            />
+                                            <div className="relative flex items-center justify-between">
+                                                <span className="text-xs text-muted-foreground">{title}</span>
+                                                <span 
+                                                    className="text-base font-mono font-semibold"
+                                                    style={{ color: baseColor }}
+                                                >
+                                                    ${parseFloat(formatUnits(shares, USDC_DECIMALS)).toFixed(2)}
+                                                </span>
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                                {hasNoPosition && (
-                                    <div className="relative overflow-hidden rounded-lg border border-red-500/25 px-3 py-2.5 bg-linear-to-br from-red-500/8 via-transparent to-red-500/15">
-                                        <div className="absolute inset-0 bg-linear-to-t from-red-500/10 to-transparent opacity-60" />
-                                        <div className="relative flex items-center justify-between">
-                                            <span className="text-xs text-muted-foreground">No</span>
-                                            <span className="text-base font-mono font-semibold text-red-500">
-                                                ${parseFloat(formatUnits(noShares, USDC_DECIMALS)).toFixed(2)}
-                                            </span>
-                                        </div>
-                                    </div>
-                                )}
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
@@ -871,7 +929,7 @@ export function TradePanel({
                     )}
 
                     {/* Actions - always show when user has something to claim */}
-                    {(hasWinningShares || userClaimableFees > 0n || (isResolved && userLiquidity > 0n)) && (
+                    {(hasWinningShares || hasVoidedShares || userClaimableFees > 0n || (isResolved && userLiquidity > 0n)) && (
 
                         <div className="space-y-2">
                             {hasWinningShares && (
@@ -882,6 +940,17 @@ export function TradePanel({
                                 >
                                     {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
                                     Claim Winnings
+                                </Button>
+                            )}
+                            
+                            {hasVoidedShares && (
+                                <Button 
+                                    onClick={handleClaimVoided}
+                                    disabled={isLoading}
+                                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]"
+                                >
+                                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
+                                    Reclaim Funds
                                 </Button>
                             )}
                             
@@ -944,46 +1013,52 @@ export function TradePanel({
                 <TabsContents>
                     <TabsContent value="buy" className="p-1">
                     <div className="space-y-4">
-                        {/* Outcome Selection */}
+                        {/* Outcome Selection - sorted by likelihood */}
                         <div className="space-y-3">
                             <Label className="text-sm text-muted-foreground">Select outcome</Label>
-                            <div className="flex flex-col gap-2">
-                                {Array.from({ length: market.outcomeCount }).map((_, idx) => {
-                                    const title = idx === 0 ? "Yes" : "No";
-                                    const price = outcomePrices[idx];
-                                    const isSelected = selectedOutcome === idx;
-                                    const colors = getOutcomeClasses(title);
-                                    const baseColor = getOutcomeColor(title, idx);
-                                    
-                                    return (
-                                    <button
-                                        key={idx}
-                                        onClick={() => onOutcomeChange(idx)}
-                                        className={cn(
-                                            "relative flex items-center justify-between p-3 rounded-lg border transition-all duration-200 w-full",
-                                            isSelected 
-                                                ? "border-transparent ring-2 ring-offset-1 ring-offset-background" 
-                                                : "border-border hover:border-border/80 bg-card/50",
-                                            isSelected ? colors.bgLight : ""
-                                        )}
-                                        style={{
-                                            boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
-                                        }}
-                                    >
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <div 
-                                                    className="w-2 h-2 rounded-full shrink-0"
-                                                    style={{ backgroundColor: baseColor }}
-                                                />
-                                                <span className="font-medium truncate">{title}</span>
-                                            </div>
-                                            <span className="font-mono font-medium ml-2 shrink-0">
-                                                {(price * 100).toFixed(1)}%
-                                            </span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
+                            {!pricesLoaded ? (
+                                <div className="flex flex-col gap-2">
+                                    {Array.from({ length: market.outcomeCount }).map((_, idx) => (
+                                        <div key={idx} className="h-12 rounded-lg border border-border bg-card/50 animate-pulse" />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-2">
+                                    {sortedOutcomes.map(({ title, idx, price }) => {
+                                        const isSelected = selectedOutcome === idx;
+                                        const colors = getOutcomeClasses(title);
+                                        const baseColor = getOutcomeColor(title, idx);
+                                        
+                                        return (
+                                        <button
+                                            key={idx}
+                                            onClick={() => onOutcomeChange(idx)}
+                                            className={cn(
+                                                "relative flex items-center justify-between p-3 rounded-lg border transition-all duration-200 w-full",
+                                                isSelected 
+                                                    ? "border-transparent ring-2 ring-offset-1 ring-offset-background" 
+                                                    : "border-border hover:border-border/80 bg-card/50",
+                                                isSelected ? colors.bgLight : ""
+                                            )}
+                                            style={{
+                                                boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
+                                            }}
+                                        >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div 
+                                                        className="w-2 h-2 rounded-full shrink-0"
+                                                        style={{ backgroundColor: baseColor }}
+                                                    />
+                                                    <span className="font-medium truncate">{title}</span>
+                                                </div>
+                                                <span className="font-mono font-medium ml-2 shrink-0">
+                                                    {(price * 100).toFixed(1)}%
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
 
                         {/* Amount Input */}
@@ -1051,14 +1126,19 @@ export function TradePanel({
                                     <span className="text-foreground">{formatShares(Number(formatUnits(simulatedBuyShares, 18)))}</span>
                                 </div>
                                 <div className="flex justify-between text-muted-foreground">
-                                    <span>Potential Return</span>
-                                    <span className="text-emerald-500 font-medium">
+                                    <span>Payout if win</span>
+                                    <span className={cn(
+                                        "font-medium",
+                                        amount && Number(amount) > 0 && Number(formatUnits(simulatedBuyShares, 18)) >= Number(amount)
+                                            ? "text-emerald-500"
+                                            : "text-rose-500"
+                                    )}>
                                         {simulatedBuyShares > 0n 
                                             ? `$${Number(formatUnits(simulatedBuyShares, 18)).toFixed(2)}` 
                                             : '$0.00'} 
                                         {' '}
                                         ({amount && Number(amount) > 0 
-                                            ? ((Number(formatUnits(simulatedBuyShares, 18)) / Number(amount) - 1) * 100).toFixed(0) 
+                                            ? `${Number(formatUnits(simulatedBuyShares, 18)) >= Number(amount) ? '+' : ''}${((Number(formatUnits(simulatedBuyShares, 18)) / Number(amount) - 1) * 100).toFixed(0)}` 
                                             : '0'}%)
                                     </span>
                                 </div>
@@ -1069,46 +1149,53 @@ export function TradePanel({
 
                     <TabsContent value="sell" className="p-1">
                     <div className="space-y-4">
-                        {/* Outcome Selection */}
+                        {/* Outcome Selection - sorted by likelihood */}
                         <div className="space-y-3">
                             <Label className="text-sm text-muted-foreground">Select outcome</Label>
-                            <div className="flex flex-col gap-2">
-                                {Array.from({ length: market.outcomeCount }).map((_, idx) => {
-                                    const title = idx === 0 ? "Yes" : "No";
-                                    const userSharesForOutcome = userOutcomeShares[idx] ?? 0n;
-                                    const isSelected = selectedOutcome === idx;
-                                    const colors = getOutcomeClasses(title);
-                                    const baseColor = getOutcomeColor(title, idx);
-                                    
-                                    return (
-                                    <button
-                                        key={idx}
-                                        onClick={() => onOutcomeChange(idx)}
-                                        className={cn(
-                                            "relative flex items-center justify-between p-3 rounded-lg border transition-all duration-200 w-full",
-                                            isSelected 
-                                                ? "border-transparent ring-2 ring-offset-1 ring-offset-background" 
-                                                : "border-border hover:border-border/80 bg-card/50",
-                                            isSelected ? colors.bgLight : ""
-                                        )}
-                                        style={{
-                                            boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
-                                        }}
-                                    >
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <div 
-                                                    className="w-2 h-2 rounded-full shrink-0"
-                                                    style={{ backgroundColor: baseColor }}
-                                                />
-                                                <span className="font-medium truncate">{title}</span>
-                                            </div>
-                                            <span className="font-mono font-medium ml-2 shrink-0">
-                                                {parseFloat(formatUnits(userSharesForOutcome, 18)).toFixed(2)} shares
-                                            </span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
+                            {!pricesLoaded ? (
+                                <div className="flex flex-col gap-2">
+                                    {Array.from({ length: market.outcomeCount }).map((_, idx) => (
+                                        <div key={idx} className="h-12 rounded-lg border border-border bg-card/50 animate-pulse" />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-2">
+                                    {sortedOutcomes.map(({ title, idx }) => {
+                                        const userSharesForOutcome = userOutcomeShares[idx] ?? 0n;
+                                        const isSelected = selectedOutcome === idx;
+                                        const colors = getOutcomeClasses(title);
+                                        const baseColor = getOutcomeColor(title, idx);
+                                        
+                                        return (
+                                        <button
+                                            key={idx}
+                                            onClick={() => onOutcomeChange(idx)}
+                                            className={cn(
+                                                "relative flex items-center justify-between p-3 rounded-lg border transition-all duration-200 w-full",
+                                                isSelected 
+                                                    ? "border-transparent ring-2 ring-offset-1 ring-offset-background" 
+                                                    : "border-border hover:border-border/80 bg-card/50",
+                                                isSelected ? colors.bgLight : ""
+                                            )}
+                                            style={{
+                                                boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
+                                            }}
+                                        >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div 
+                                                        className="w-2 h-2 rounded-full shrink-0"
+                                                        style={{ backgroundColor: baseColor }}
+                                                    />
+                                                    <span className="font-medium truncate">{title}</span>
+                                                </div>
+                                                <span className="font-mono font-medium ml-2 shrink-0">
+                                                    {parseFloat(formatUnits(userSharesForOutcome, 18)).toFixed(2)} shares
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
 
                         {/* Shares Input */}

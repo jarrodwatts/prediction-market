@@ -31,9 +31,10 @@ interface PriceChartProps {
   marketId: bigint;
   outcomeCount: number;
   selectedOutcome?: number;
+  outcomeTitles?: string[];
 }
 
-export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0 }: PriceChartProps) {
+export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0, outcomeTitles }: PriceChartProps) {
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("all");
   const client = usePublicClient();
 
@@ -100,26 +101,28 @@ export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0 }: Pric
       return filtered;
   }, [chartData, timeFrame]);
 
+  // Helper to get outcome title
+  const getOutcomeTitle = (index: number) => {
+    if (outcomeTitles && outcomeTitles[index]) return outcomeTitles[index];
+    if (outcomeCount === 2) return index === 0 ? "Yes" : "No";
+    return `Option ${index + 1}`;
+  };
+
   // Build chart config
   const chartConfig = useMemo<ChartConfig>(() => {
     const config: ChartConfig = {};
     Array.from({ length: outcomeCount }).forEach((_, index) => {
-      const title = index === 0 ? "Yes" : "No"; // Default for binary
+      const title = getOutcomeTitle(index);
       config[`outcome_${index}`] = {
         label: title,
         color: getOutcomeColor(title, index),
       };
     });
     return config;
-  }, [outcomeCount]);
+  }, [outcomeCount, outcomeTitles]);
 
   const hasData = filteredData.length > 0;
   const lastIdx = filteredData.length - 1;
-
-  const getOutcomeTitle = (index: number) => {
-    if (outcomeCount === 2) return index === 0 ? "Yes" : "No";
-    return `Option ${index + 1}`;
-  };
 
   const selectedKey = `outcome_${selectedOutcome}`;
   const selectedPct = hasData

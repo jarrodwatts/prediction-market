@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:tunnel": "./scripts/dev-tunnel.sh",
+    "dev:full": "./scripts/dev-full.sh",
+    "tunnel:setup": "./scripts/setup-tunnel.sh",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

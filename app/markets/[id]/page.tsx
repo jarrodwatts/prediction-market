@@ -30,8 +30,8 @@ export default function MarketDetailPage() {
     queryFn: async () => {
         if (!publicClient) throw new Error("No client");
 
-        // Fetch market data from contract
-        const [data, pricesData] = await Promise.all([
+        // Fetch market data from contract and outcome names from API in parallel
+        const [data, pricesData, metaResponse] = await Promise.all([
           publicClient.readContract({
             address: PREDICTION_MARKET_ADDRESS,
             abi: PREDICTION_MARKET_ABI,
@@ -46,6 +46,10 @@ export default function MarketDetailPage() {
               args: [id],
             })
             .catch(() => [0n, []] as any),
+          // Fetch outcome names from API (stored in KV from Twitch)
+          fetch(`/api/markets/meta?marketId=${id.toString()}`)
+            .then(r => r.json())
+            .catch(() => null) as Promise<{ found: boolean; outcomes?: string[] } | null>,
         ]);
 
         // Fetch logs to get question and image
@@ -103,6 +107,11 @@ export default function MarketDetailPage() {
             return acc;
         }, 0n);
 
+        // Get outcome names from API response
+        const outcomes = metaResponse?.found && metaResponse.outcomes 
+          ? metaResponse.outcomes 
+          : undefined;
+
         return {
             id,
             question: creationLog.args.question!,
@@ -118,6 +127,7 @@ export default function MarketDetailPage() {
             createdAt: block.timestamp,
             volume: volume,
             prices,
+            outcomes,
         } as MarketData;
     },
     enabled: !!publicClient
@@ -140,10 +150,13 @@ export default function MarketDetailPage() {
     );
   }
 
+  // Use actual outcome names from API if available, otherwise fallback to defaults
   const outcomeTitles =
-    market.outcomeCount === 2
-      ? ["Yes", "No"]
-      : Array.from({ length: market.outcomeCount }).map((_, i) => `Option ${i + 1}`);
+    market.outcomes && market.outcomes.length === market.outcomeCount
+      ? market.outcomes
+      : market.outcomeCount === 2
+        ? ["Yes", "No"]
+        : Array.from({ length: market.outcomeCount }).map((_, i) => `Option ${i + 1}`);
 
   const now = Date.now();
   const closesAtMs = Number(market.closesAt) * 1000;
@@ -175,11 +188,11 @@ export default function MarketDetailPage() {
 
           {/* Price Chart */}
           <div className="rounded-xl border border-border bg-card p-4">
-            <PriceChart marketId={market.id} outcomeCount={market.outcomeCount} selectedOutcome={selectedOutcome} />
+            <PriceChart marketId={market.id} outcomeCount={market.outcomeCount} selectedOutcome={selectedOutcome} outcomeTitles={outcomeTitles} />
           </div>
 
-          {/* Outcomes (Kalshi-style density under chart) */}
-          <div className="rounded-xl border border-border bg-card">
+          {/* Outcomes (Kalshi-style density under chart) - Hidden for now */}
+          {/* <div className="rounded-xl border border-border bg-card">
             <button
               onClick={() => setOutcomesExpanded(!outcomesExpanded)}
               className="flex w-full items-center justify-between p-4 text-left"
@@ -223,7 +236,7 @@ export default function MarketDetailPage() {
                 })}
               </div>
             )}
-          </div>
+          </div> */}
 
           {/* Rules Section */}
           <MarketRules

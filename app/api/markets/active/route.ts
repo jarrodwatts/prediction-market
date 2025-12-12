@@ -110,6 +110,12 @@ export async function GET(request: NextRequest) {
         marketState = 'resolved'
       }
 
+      // Check if market is voided:
+      // - resolvedOutcomeId is -1 (contract uses int256, returns -1 for voided)
+      // - OR resolvedOutcomeId >= outcomeCount
+      const resolvedId = Number(resolvedOutcomeId)
+      const isVoided = marketState === 'resolved' && (resolvedId < 0 || resolvedId >= predictionData.outcomes.length)
+
       return NextResponse.json({
         id: marketId.toString(),
         twitchPredictionId: activePredictionId,
@@ -120,22 +126,28 @@ export async function GET(request: NextRequest) {
         closesAt: Number(closesAt),
         liquidity: liquidity.toString(),
         balance: balance.toString(),
-        resolvedOutcome: marketState === 'resolved' ? Number(resolvedOutcomeId) : null,
+        resolvedOutcome: marketState === 'resolved' && !isVoided ? Number(resolvedOutcomeId) : null,
+        isVoided,
       }, { headers: corsHeaders })
     } catch (contractError) {
       console.error('Error reading contract:', contractError)
       
       // Return prediction data without contract info (fast fallback)
+      // If KV says resolved but we can't read contract, assume potentially voided
+      const fallbackState = predictionData.state === 'resolved' ? 'resolved' : 
+                            predictionData.state === 'locked' ? 'closed' : 'open'
       return NextResponse.json({
         id: predictionData.marketId?.toString() ?? null,
         twitchPredictionId: activePredictionId,
         question: predictionData.question,
         outcomes: predictionData.outcomes,
         prices: predictionData.outcomes.map(() => 0.5),
-        state: 'open',
+        state: fallbackState,
         closesAt: predictionData.locksAt,
         liquidity: '0',
         balance: '0',
+        resolvedOutcome: null,
+        isVoided: false, // Can't determine without contract data
       }, { headers: corsHeaders })
     }
   } catch (error) {

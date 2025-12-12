@@ -35,6 +35,10 @@ function getTimelineEvents(market: MarketData): TimelineEvent[] {
   // Market is closed if state >= 1 OR if current time is past closesAt
   const closed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
   const resolved = market.state === 2;
+  
+  // A market is voided when resolvedOutcomeId is -1 (contract uses int256) or >= outcomeCount
+  const resolvedOutcomeId = Number(market.resolvedOutcomeId);
+  const isVoided = resolved && (resolvedOutcomeId < 0 || resolvedOutcomeId >= market.outcomeCount);
 
   const events: TimelineEvent[] = [
     {
@@ -50,12 +54,23 @@ function getTimelineEvents(market: MarketData): TimelineEvent[] {
   ];
 
   if (resolved) {
-    events.push({
-      title: "Resolution",
-      date: null,
-      description: `Resolved (Outcome ID: ${market.resolvedOutcomeId})`,
-      isCompleted: true,
-    });
+    if (isVoided) {
+      events.push({
+        title: "Canceled",
+        date: null,
+        description: "Prediction was canceled. Funds can be reclaimed.",
+        isCompleted: true,
+      });
+    } else {
+      // Get outcome name if available
+      const outcomeName = market.outcomes?.[resolvedOutcomeId];
+      events.push({
+        title: "Resolution",
+        date: null,
+        description: outcomeName ? `Resolved: ${outcomeName}` : `Resolved (Outcome ${resolvedOutcomeId + 1})`,
+        isCompleted: true,
+      });
+    }
   } else {
     events.push({
       title: "Resolution",

@@ -3,8 +3,8 @@
 /**
  * Twitch Video Overlay - Betting UI
  * 
- * Compact overlay that appears on the streamer's video, allowing viewers
- * to place bets on prediction markets using USDC.
+ * Overlay panel for placing bets on prediction markets using USDC.
+ * Mirrors the TradePanel buy flow with quick preset amounts.
  * 
  * Add ?mock=true to test locally with mock data
  */
@@ -17,18 +17,18 @@ import { parseUnits, formatUnits, encodeFunctionData } from 'viem'
 import { useTwitchExtension } from '@/lib/use-twitch-extension'
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from '@/lib/contract'
 import { calcBuyAmount, getPrice } from '@/lib/market-math'
+import { getOutcomeColor, getOutcomeClasses } from '@/lib/outcome-colors'
 import { cn } from '@/lib/utils'
-import { Loader2, Wallet, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { CheckCircle, Clock, DollarSign, Loader2, Lock, Trophy, Wallet } from 'lucide-react'
 
 // USDC configuration
 const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`
 const USDC_DECIMALS = 6
 
 // API Base URL for fetching market data
-// Use relative URLs when on localhost to avoid CORS issues
 const getApiBaseUrl = () => {
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    return '' // Use relative URLs on localhost
+    return ''
   }
   return process.env.NEXT_PUBLIC_APP_URL || ''
 }
@@ -75,6 +75,7 @@ interface MarketApiResponse {
   liquidity: string
   balance: string
   resolvedOutcome?: number | null
+  isVoided?: boolean
 }
 
 // Mock market data for local testing (use ?mock=true)
@@ -86,7 +87,7 @@ function getMockMarket(): MarketApiResponse {
     outcomes: ['Yes', 'No'],
     prices: [0.65, 0.35],
     state: 'open',
-    closesAt: Math.floor(Date.now() / 1000) + 300, // 5 minutes from now
+    closesAt: Math.floor(Date.now() / 1000) + 300,
     liquidity: '1000000000',
     balance: '500000000',
   }
@@ -100,20 +101,30 @@ function parseUSDC(value: string): bigint {
   return parseUnits(value, USDC_DECIMALS)
 }
 
+function formatCountdown(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds))
+  if (s >= 60 * 60) {
+    const hours = Math.floor(s / 3600)
+    const minutes = Math.floor((s % 3600) / 60)
+    const seconds = s % 60
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+  }
+  const minutes = Math.floor(s / 60)
+  const seconds = s % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
 // Quick bet amounts
 const BET_AMOUNTS = [1, 5, 10, 25]
 
 export default function OverlayPage() {
-  // Check for mock mode (?mock=true for local testing)
-  // Or test mode with real data (?channelId=YOUR_CHANNEL_ID)
   const searchParams = useSearchParams()
   const isMockMode = searchParams.get('mock') === 'true'
-  const testChannelId = searchParams.get('channelId') // For testing without Twitch iframe
+  const testChannelId = searchParams.get('channelId')
   const isTestMode = !!testChannelId
   
-  const [isExpanded, setIsExpanded] = useState(isMockMode || isTestMode) // Auto-expand in mock/test mode
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
-  const [betAmount, setBetAmount] = useState<number | null>(null)
+  const [amount, setAmount] = useState('')
   const [market, setMarket] = useState<MarketApiResponse | null>(isMockMode ? getMockMarket() : null)
   const [isLoadingMarket, setIsLoadingMarket] = useState(!isMockMode)
   const [marketError, setMarketError] = useState<string | null>(null)
@@ -122,14 +133,14 @@ export default function OverlayPage() {
   const [isClaimTx, setIsClaimTx] = useState(false)
   const [hasClaimed, setHasClaimed] = useState(false)
 
-  // Twitch extension context (skipped in mock/test mode)
-  const { isReady, channelId, token, minimize } = useTwitchExtension()
+  // Twitch extension context
+  const { isReady, channelId, token } = useTwitchExtension()
   const effectiveIsReady = isMockMode || isTestMode || isReady
   const effectiveChannelId = isMockMode ? 'mock-channel' : (testChannelId || channelId)
 
   // Wallet connection
-  const { login, logout } = useLoginWithAbstract()
-  const { data: abstractClient, isLoading: isWalletLoading } = useAbstractClient()
+  const { login } = useLoginWithAbstract()
+  const { isLoading: isWalletLoading } = useAbstractClient()
   const { address, isConnected } = useAccount()
 
   // Contract interactions
@@ -188,7 +199,7 @@ export default function OverlayPage() {
     query: { enabled: !!market?.id },
   })
 
-  // Get user's shares for this market (returns [liquidity, outcomeShares[]])
+  // Get user's shares for this market
   const { data: userShares } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
@@ -211,38 +222,41 @@ export default function OverlayPage() {
     )
   }, [market, outcomeShares, liquidity])
 
+  // Parse the amount input
+  const amountValue = useMemo(() => {
+    const parsed = parseFloat(amount)
+    return isNaN(parsed) || parsed <= 0 ? 0 : parsed
+  }, [amount])
+
   // Calculate estimated shares for bet
   const estimatedShares = useMemo(() => {
-    if (!betAmount || selectedOutcome === null || !outcomeShares.length) return 0n
+    if (!amountValue || selectedOutcome === null || !outcomeShares.length) return 0n
     try {
-      const scaledAmount = parseUSDC(betAmount.toString()) * BigInt(10 ** 12)
+      const scaledAmount = parseUSDC(amountValue.toString()) * BigInt(10 ** 12)
       return calcBuyAmount(scaledAmount, selectedOutcome, [...outcomeShares], buyFee)
     } catch {
       return 0n
     }
-  }, [betAmount, selectedOutcome, outcomeShares, buyFee])
+  }, [amountValue, selectedOutcome, outcomeShares, buyFee])
 
   // Check if approval needed
   const needsApproval = useMemo(() => {
-    if (!betAmount) return false
-    // If allowance not yet loaded, assume we need approval to be safe
+    if (!amountValue) return false
     if (usdcAllowance === undefined) return true
     try {
-      return usdcAllowance < parseUSDC(betAmount.toString())
+      return usdcAllowance < parseUSDC(amountValue.toString())
     } catch {
-      return true // Assume approval needed on error
+      return true
     }
-  }, [betAmount, usdcAllowance])
+  }, [amountValue, usdcAllowance])
 
-  // Fetch active market for this channel (skip in mock mode)
+  // Fetch active market for this channel
   useEffect(() => {
-    // In mock mode, we already have the market data
     if (isMockMode) {
       setIsLoadingMarket(false)
       return
     }
     
-    // Use effective values (supports both Twitch iframe and ?channelId= test mode)
     if (!effectiveIsReady || !effectiveChannelId) return
 
     const fetchMarket = async () => {
@@ -272,7 +286,7 @@ export default function OverlayPage() {
     }
 
     fetchMarket()
-    const interval = setInterval(fetchMarket, 2000) // Poll every 2 seconds for responsive updates
+    const interval = setInterval(fetchMarket, 2000)
     return () => clearInterval(interval)
   }, [isMockMode, effectiveIsReady, effectiveChannelId, token])
 
@@ -285,17 +299,15 @@ export default function OverlayPage() {
       handledHashRef.current = hash
       setTxSuccess(true)
       setIsPending(false)
-      setBetAmount(null)
+      setAmount('')
       setSelectedOutcome(null)
       refetchBalance()
       refetchAllowance()
       refetchShares()
       
-      // If this was a claim transaction, mark as claimed and clear the prediction
       if (isClaimTx) {
         setHasClaimed(true)
         setIsClaimTx(false)
-        // Clear the active prediction from KV so next poll shows "no active prediction"
         if (effectiveChannelId) {
           fetch(`${getApiBaseUrl()}/api/admin/clear-prediction`, {
             method: 'POST',
@@ -314,7 +326,7 @@ export default function OverlayPage() {
       handledBatchIdRef.current = batchId
       setTxSuccess(true)
       setIsPending(false)
-      setBetAmount(null)
+      setAmount('')
       setSelectedOutcome(null)
       refetchBalance()
       refetchAllowance()
@@ -324,15 +336,14 @@ export default function OverlayPage() {
   }, [isBatchSuccess, batchId, refetchBalance, refetchAllowance, refetchShares])
 
   const handleBuy = () => {
-    if (!betAmount || selectedOutcome === null || !market) return
+    if (!amountValue || selectedOutcome === null || !market) return
     
     setIsPending(true)
     
     try {
-      const amountBigInt = parseUSDC(betAmount.toString())
+      const amountBigInt = parseUSDC(amountValue.toString())
       
       if (needsApproval) {
-        // Batch approve + buy
         sendCalls({
           calls: [
             {
@@ -367,458 +378,466 @@ export default function OverlayPage() {
     }
   }
 
-  // Calculate time remaining
-  const timeRemaining = useMemo(() => {
-    if (!market?.closesAt) return null
-    const now = Math.floor(Date.now() / 1000)
-    const remaining = market.closesAt - now
-    if (remaining <= 0) return 'Closed'
-    const minutes = Math.floor(remaining / 60)
-    const seconds = remaining % 60
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`
-  }, [market?.closesAt])
+  // Handle quick amount button click
+  const handleQuickAmount = (amt: number) => {
+    setAmount(amt.toString())
+  }
 
-  // Update timer every second
-  const [, setTick] = useState(0)
+  // Handle percentage of balance click
+  const handlePercentage = (pct: number) => {
+    if (!usdcBalance) return
+    const bal = Number(formatUSDC(usdcBalance))
+    const newAmount = Math.floor(bal * pct * 100) / 100
+    setAmount(newAmount.toString())
+  }
+
+  // Update "now" every second so countdown ticks in real time
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000))
   useEffect(() => {
-    const interval = setInterval(() => setTick(t => t + 1), 1000)
+    const interval = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000)
     return () => clearInterval(interval)
   }, [])
 
+  const timeRemaining = useMemo(() => {
+    if (!market?.closesAt) return null
+    const remaining = market.closesAt - nowSec
+    if (remaining <= 0) return 'Closed'
+    return formatCountdown(remaining)
+  }, [market?.closesAt, nowSec])
+
   const isLoading = isWritePending || isBatchPending || isConfirming || isPending
   
-  // Check market state - also consider time-based closure
-  const now = Math.floor(Date.now() / 1000)
-  const isTimePassed = market?.closesAt ? now > market.closesAt : false
+  // Check market state
+  const isTimePassed = market?.closesAt ? nowSec > market.closesAt : false
   const isMarketClosed = market?.state === 'closed' || (market?.state === 'open' && isTimePassed)
   const isMarketResolved = market?.state === 'resolved'
   const isMarketPending = market?.state === 'pending'
 
-  // No market state - show minimal badge
+  // Calculate order summary values
+  const pricePerShare = selectedOutcome !== null ? outcomePrices[selectedOutcome] : 0
+  const estShares = Number(formatUnits(estimatedShares, 18))
+  const potentialReturn = estShares
+  const potentialReturnPct = amountValue > 0 ? ((potentialReturn / amountValue - 1) * 100) : 0
+
+  // Common panel wrapper - fills the Video Component iframe
+  const PanelWrapper = ({ children }: { children: React.ReactNode }) => (
+    <div className="h-full w-full overflow-auto bg-card">
+      <div className="min-h-full">
+        {children}
+      </div>
+    </div>
+  )
+
+  // No market state
   if (!market) {
     return (
-      <div className="fixed bottom-20 right-5">
-        <div className="flex items-center gap-2 px-4 py-2 bg-black/70 backdrop-blur-md rounded-full text-white/50 text-sm">
-          <span className="text-lg">🎯</span>
-          <span>No active prediction</span>
+      <div className="flex h-full w-full items-center justify-center bg-card p-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
+          No active prediction
         </div>
       </div>
     )
   }
 
-  // Market is being created on-chain - show loading state
+  // Market pending state
   if (isMarketPending) {
     return (
-      <div className="fixed bottom-20 right-5 w-80">
-        <div className="bg-black/92 backdrop-blur-xl rounded-2xl border border-purple-500/30 overflow-hidden shadow-2xl">
-          {/* Header */}
-          <div className="flex items-center gap-3 p-3 bg-purple-500/10 border-b border-purple-500/20">
-            <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
-            <span className="flex-1 font-semibold text-sm text-white truncate">
-              {market.question}
-            </span>
+      <PanelWrapper>
+        <div className="border-b border-border/40 p-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Creating market...
           </div>
-
-          {/* Pending State */}
-          <div className="p-4 space-y-3">
-            <div className="flex gap-2">
-              {market.outcomes.map((outcome, idx) => {
-                const isYes = idx === 0
-                
-                return (
-                  <div
-                    key={idx}
-                    className="flex-1 p-3 rounded-xl border border-white/10 bg-white/5 text-center opacity-50"
-                  >
-                    <div className="text-sm font-semibold text-white/70">{outcome}</div>
-                    <div className={cn(
-                      'text-2xl font-bold',
-                      isYes ? 'text-emerald-400/50' : 'text-red-400/50'
-                    )}>
-                      50%
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            
-            <div className="text-center py-2">
-              <div className="text-purple-400 font-semibold text-sm flex items-center justify-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Creating Market...
-              </div>
-              <div className="text-white/50 text-xs mt-1">Betting opens shortly</div>
-            </div>
-          </div>
+          <h2 className="mt-2 font-semibold text-foreground">{market.question}</h2>
         </div>
-      </div>
+        <div className="p-4 space-y-3">
+          {market.outcomes.map((outcome, idx) => {
+            const baseColor = getOutcomeColor(outcome, idx)
+            return (
+              <div
+                key={idx}
+                className="relative flex items-center justify-between rounded-lg border border-border/50 bg-muted/30 p-3 opacity-60"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: baseColor }} />
+                  <span className="font-medium">{outcome}</span>
+                </div>
+                <span className="font-mono text-muted-foreground">50.0%</span>
+              </div>
+            )
+          })}
+          <p className="text-center text-xs text-muted-foreground">Betting opens shortly</p>
+        </div>
+      </PanelWrapper>
     )
   }
 
-  // Market is closed (locked) - show locked state
+  // Market closed state
   if (isMarketClosed) {
     return (
-      <div className="fixed bottom-20 right-5 w-80">
-        <div className="bg-black/92 backdrop-blur-xl rounded-2xl border border-yellow-500/30 overflow-hidden shadow-2xl">
-          {/* Header */}
-          <div className="flex items-center gap-3 p-3 bg-yellow-500/10 border-b border-yellow-500/20">
-            <span className="text-lg">🔒</span>
-            <span className="flex-1 font-semibold text-sm text-white truncate">
-              {market.question}
-            </span>
+      <PanelWrapper>
+        <div className="border-b border-border/40 p-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Lock className="h-4 w-4" />
+            Betting closed
           </div>
-
-          {/* Locked State */}
-          <div className="p-4 space-y-3">
-            <div className="flex gap-2">
-              {market.outcomes.map((outcome, idx) => {
-                const price = outcomePrices[idx] || 0.5
-                const isYes = idx === 0
-                
-                return (
-                  <div
-                    key={idx}
-                    className="flex-1 p-3 rounded-xl border border-white/10 bg-white/5 text-center opacity-75"
-                  >
-                    <div className="text-sm font-semibold text-white/70">{outcome}</div>
-                    <div className={cn(
-                      'text-2xl font-bold',
-                      isYes ? 'text-emerald-400/70' : 'text-red-400/70'
-                    )}>
-                      {Math.round(price * 100)}%
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            
-            <div className="text-center py-2">
-              <div className="text-yellow-400 font-semibold text-sm">Betting Closed</div>
-              <div className="text-white/50 text-xs mt-1">Awaiting results...</div>
-            </div>
-          </div>
+          <h2 className="mt-2 font-semibold text-foreground">{market.question}</h2>
         </div>
-      </div>
+        <div className="p-4 space-y-3">
+          {market.outcomes.map((outcome, idx) => {
+            const price = outcomePrices[idx] || 0.5
+            const baseColor = getOutcomeColor(outcome, idx)
+            const pct = Math.round(price * 100)
+            return (
+              <div
+                key={idx}
+                className="relative overflow-hidden rounded-lg border border-border/50 bg-muted/20 p-3"
+              >
+                <div
+                  className="absolute inset-y-0 left-0"
+                  style={{
+                    width: `${pct}%`,
+                    background: `linear-gradient(90deg,
+                      color-mix(in srgb, ${baseColor} 20%, transparent) 0%,
+                      color-mix(in srgb, ${baseColor} 10%, transparent) 100%
+                    )`,
+                  }}
+                />
+                <div className="relative flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: baseColor }} />
+                    <span className="font-medium">{outcome}</span>
+                  </div>
+                  <span className="font-mono font-semibold">{pct}.0%</span>
+                </div>
+              </div>
+            )
+          })}
+          <p className="text-center text-sm text-muted-foreground">Awaiting results...</p>
+        </div>
+      </PanelWrapper>
     )
   }
 
-  // Claim winnings handler
-  const handleClaimWinnings = () => {
-    if (!market?.id) return
-    setIsPending(true)
-    setIsClaimTx(true) // Mark this as a claim transaction
-    writeContract({
-      address: PREDICTION_MARKET_ADDRESS,
-      abi: PREDICTION_MARKET_ABI,
-      functionName: 'claimWinnings',
-      args: [BigInt(market.id)]
-    })
-  }
-
-  // Market is resolved - show result card
+  // Market resolved state (includes voided)
   if (isMarketResolved) {
+    // Market is voided if API says so, OR if resolved but no valid winning outcome
+    const isVoided = market.isVoided === true || (market.resolvedOutcome === null || market.resolvedOutcome === undefined)
+    // userShares returns: { liquidity: bigint, outcomes: bigint[] } or [bigint, bigint[]]
+    // Handle both named property access and array index access
+    const getUserOutcomeShares = (): readonly bigint[] | undefined => {
+      if (!userShares) return undefined
+      // Check for named property first (wagmi with named ABI outputs)
+      if ('outcomes' in userShares && Array.isArray(userShares.outcomes)) {
+        return userShares.outcomes as readonly bigint[]
+      }
+      // Fallback to array index access
+      if (Array.isArray(userShares[1])) {
+        return userShares[1] as readonly bigint[]
+      }
+      return undefined
+    }
+    const userOutcomeShares = getUserOutcomeShares()
+    
+    // For voided markets, users can reclaim all their shares
+    // For resolved markets, only the winning outcome shares matter
+    const totalUserShares = userOutcomeShares 
+      ? userOutcomeShares.reduce((sum: bigint, s: bigint) => sum + s, 0n) 
+      : 0n
+    const hasShares = totalUserShares > 0n
+
     const winningOutcomeIndex = market.resolvedOutcome ?? 0
     const winningOutcome = market.outcomes[winningOutcomeIndex] || 'Unknown'
-    const isYesWinner = winningOutcomeIndex === 0
-    
-    // getUserMarketShares returns [liquidity, outcomeShares[]]
-    const userOutcomeShares = userShares ? (userShares as [bigint, bigint[]])[1] : undefined
-    const yesShares = userOutcomeShares?.[0] ?? 0n
-    const noShares = userOutcomeShares?.[1] ?? 0n
+    const winnerColor = getOutcomeColor(winningOutcome, winningOutcomeIndex)
     const winningSharesRaw = userOutcomeShares?.[winningOutcomeIndex] ?? 0n
-    
-    // Shares are in USDC decimals (6)
-    const winningsUSDC = parseFloat(formatUnits(winningSharesRaw, USDC_DECIMALS))
-    const hasYesPosition = yesShares > 0n
-    const hasNoPosition = noShares > 0n
-    const hasPosition = hasYesPosition || hasNoPosition
     const hasWinningShares = winningSharesRaw > 0n
-    
-    return (
-      <div className="fixed bottom-20 right-5 w-80">
-        <div className={cn(
-          "bg-black/92 backdrop-blur-xl rounded-2xl border overflow-hidden shadow-2xl",
-          isYesWinner ? "border-emerald-500/30" : "border-red-500/30"
-        )}>
-          {/* Header */}
-          <div className={cn(
-            "flex items-center gap-3 p-3 border-b",
-            isYesWinner ? "bg-emerald-500/10 border-emerald-500/20" : "bg-red-500/10 border-red-500/20"
-          )}>
-            <span className="text-lg">🏆</span>
-            <span className="flex-1 font-semibold text-sm text-white">
-              Market Resolved
-            </span>
-            <span className={cn(
-              "text-sm font-semibold",
-              isYesWinner ? "text-emerald-400" : "text-red-400"
-            )}>
-              {winningOutcome} wins
-            </span>
+
+    const handleClaimWinnings = () => {
+      if (!market?.id) return
+      setIsPending(true)
+      setIsClaimTx(true)
+      writeContract({
+        address: PREDICTION_MARKET_ADDRESS,
+        abi: PREDICTION_MARKET_ABI,
+        functionName: 'claimWinnings',
+        args: [BigInt(market.id)]
+      })
+    }
+
+    // For voided markets, claim each outcome separately
+    const handleClaimVoided = async () => {
+      if (!market?.id || !userOutcomeShares) return
+      setIsPending(true)
+      setIsClaimTx(true)
+      
+      // Find first outcome with shares to claim
+      for (let i = 0; i < userOutcomeShares.length; i++) {
+        if (userOutcomeShares[i] > 0n) {
+          writeContract({
+            address: PREDICTION_MARKET_ADDRESS,
+            abi: PREDICTION_MARKET_ABI,
+            functionName: 'claimVoidedOutcomeShares',
+            args: [BigInt(market.id), BigInt(i)]
+          })
+          break
+        }
+      }
+    }
+
+    // Voided market UI
+    if (isVoided) {
+      return (
+        <PanelWrapper>
+          <div className="border-b border-border/40 p-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Lock className="h-4 w-4" />
+              Prediction canceled
+            </div>
+            <h2 className="mt-2 font-semibold text-foreground">{market.question}</h2>
           </div>
-
-          {/* Content */}
-          <div className="p-4 space-y-3">
-            {/* Status message */}
-            <p className="text-sm text-white/60">
-              This market has been finalized.
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              This prediction was canceled by the streamer. You can reclaim your original investment.
             </p>
-
-            {/* User's Position */}
-            {hasPosition && isConnected && (
-              <div className="rounded-lg border border-white/10 bg-white/5 p-3 space-y-2">
-                <div className="text-xs font-medium uppercase tracking-wide text-white/50">
-                  Your positions
-                </div>
-                
-                <div className={cn(
-                  "gap-2",
-                  hasYesPosition && hasNoPosition ? "grid grid-cols-2" : "grid grid-cols-1"
-                )}>
-                  {hasYesPosition && (
-                    <div className={cn(
-                      "rounded-lg border px-3 py-2",
-                      winningOutcomeIndex === 0 
-                        ? "border-emerald-500/30 bg-emerald-500/10" 
-                        : "border-white/10 bg-white/5 opacity-50"
-                    )}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-white/60">Yes</span>
-                        <span className={cn(
-                          "text-base font-mono font-semibold",
-                          winningOutcomeIndex === 0 ? "text-emerald-400" : "text-white/40"
-                        )}>
-                          ${parseFloat(formatUnits(yesShares, USDC_DECIMALS)).toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  {hasNoPosition && (
-                    <div className={cn(
-                      "rounded-lg border px-3 py-2",
-                      winningOutcomeIndex === 1 
-                        ? "border-red-500/30 bg-red-500/10" 
-                        : "border-white/10 bg-white/5 opacity-50"
-                    )}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-white/60">No</span>
-                        <span className={cn(
-                          "text-base font-mono font-semibold",
-                          winningOutcomeIndex === 1 ? "text-red-400" : "text-white/40"
-                        )}>
-                          ${parseFloat(formatUnits(noShares, USDC_DECIMALS)).toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Claim Button or Success */}
-            {hasWinningShares && isConnected && !hasClaimed && (
+            {hasShares && isConnected && !hasClaimed && (
               <button
-                onClick={handleClaimWinnings}
-                disabled={isPending || isWritePending || isConfirming}
-                className="w-full py-3 px-4 rounded-xl font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                onClick={handleClaimVoided}
+                disabled={isLoading}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
-                {(isPending || isWritePending || isConfirming) ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <span className="text-lg">🪙</span>
-                )}
-                Claim Winnings
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                Reclaim Funds
               </button>
             )}
-
-            {/* Claimed Success */}
             {hasClaimed && (
-              <div className="w-full py-3 px-4 rounded-xl font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 text-center flex items-center justify-center gap-2">
-                <span className="text-lg">✅</span>
-                Claimed! Winnings sent to your wallet
+              <div className="flex items-center justify-center gap-2 rounded-lg border border-primary/20 bg-primary/10 py-3 text-primary">
+                <CheckCircle className="h-4 w-4" />
+                Funds reclaimed!
               </div>
             )}
-
-            {/* Not connected message */}
-            {!isConnected && (
+            {!isConnected && hasShares && (
               <button
                 onClick={login}
-                className="w-full py-2 px-4 rounded-xl text-sm text-white/60 bg-white/5 hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-muted/30 py-3 text-sm text-muted-foreground hover:bg-muted/50"
               >
-                <Wallet className="w-4 h-4" />
-                Connect wallet to see your result
+                <Wallet className="h-4 w-4" />
+                Connect wallet to reclaim
               </button>
             )}
-
-            {/* No position message */}
-            {isConnected && !hasPosition && (
-              <div className="text-center text-white/40 text-xs py-2">
-                You didn't participate in this prediction
-              </div>
+            {isConnected && !hasShares && (
+              <p className="text-center text-sm text-muted-foreground">
+                You have no shares to reclaim.
+              </p>
             )}
           </div>
-        </div>
-      </div>
-    )
-  }
+        </PanelWrapper>
+      )
+    }
 
-  // Minimized state
-  if (!isExpanded) {
+    // Normal resolved market UI
     return (
-      <div className="fixed bottom-20 right-5">
-        <button
-          onClick={() => setIsExpanded(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-black/85 backdrop-blur-md rounded-full text-white hover:bg-black/95 transition-all hover:scale-105 border border-white/10"
-        >
-          <span className="text-lg">🎯</span>
-          <span className="font-semibold">{Math.round(Math.max(...outcomePrices) * 100)}%</span>
-          <ChevronUp className="w-4 h-4 text-white/60" />
-        </button>
-      </div>
+      <PanelWrapper>
+        <div className="border-b border-border/40 p-4">
+          <div className="flex items-center gap-2 text-sm" style={{ color: winnerColor }}>
+            <Trophy className="h-4 w-4" />
+            {winningOutcome} wins
+          </div>
+          <h2 className="mt-2 font-semibold text-foreground">{market.question}</h2>
+        </div>
+        <div className="p-4 space-y-4">
+          {hasWinningShares && isConnected && !hasClaimed && (
+            <button
+              onClick={handleClaimWinnings}
+              disabled={isLoading}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+              Claim Winnings
+            </button>
+          )}
+          {hasClaimed && (
+            <div className="flex items-center justify-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 py-3 text-emerald-400">
+              <CheckCircle className="h-4 w-4" />
+              Winnings claimed!
+            </div>
+          )}
+          {!isConnected && (
+            <button
+              onClick={login}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-muted/30 py-3 text-sm text-muted-foreground hover:bg-muted/50"
+            >
+              <Wallet className="h-4 w-4" />
+              Connect wallet to claim
+            </button>
+          )}
+          {isConnected && !hasWinningShares && !hasClaimed && (
+            <p className="text-center text-sm text-muted-foreground">
+              You didn&apos;t bet on the winning outcome.
+            </p>
+          )}
+        </div>
+      </PanelWrapper>
     )
   }
 
-  // Expanded state
+  // Active market - main buy UI
   return (
-    <div className="fixed bottom-20 right-5 w-80">
-      <div className="bg-black/92 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center gap-3 p-3 bg-white/5 border-b border-white/10">
-          <span className="text-lg">🎯</span>
-          <span className="flex-1 font-semibold text-sm text-white truncate">
-            {market.question}
-          </span>
-          <button
-            onClick={() => setIsExpanded(false)}
-            className="p-1 hover:bg-white/10 rounded transition-colors"
-          >
-            <ChevronDown className="w-4 h-4 text-white/60" />
-          </button>
+    <PanelWrapper>
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-border/40 p-4">
+        <h2 className="flex-1 font-semibold text-foreground line-clamp-2">{market.question}</h2>
+        <div className="ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Clock className="h-3.5 w-3.5" />
+          <span className="font-mono tabular-nums">{timeRemaining}</span>
         </div>
+      </div>
 
-        {/* Outcomes */}
-        <div className="p-3 space-y-2">
-          <div className="flex gap-2">
+      <div className="p-4 space-y-4">
+        {/* Outcome Selection */}
+        <div className="space-y-2">
+          <label className="text-sm text-muted-foreground">Select outcome</label>
+          <div className="space-y-2">
             {market.outcomes.map((outcome, idx) => {
               const price = outcomePrices[idx] || 0.5
-              const isYes = idx === 0
               const isSelected = selectedOutcome === idx
+              const baseColor = getOutcomeColor(outcome, idx)
+              const colors = getOutcomeClasses(outcome)
               
               return (
                 <button
                   key={idx}
                   onClick={() => setSelectedOutcome(idx)}
                   className={cn(
-                    'flex-1 p-3 rounded-xl border-2 transition-all text-center',
+                    'relative flex w-full items-center justify-between rounded-lg border p-3 transition-all',
                     isSelected
-                      ? isYes
-                        ? 'border-emerald-500 bg-emerald-500/20'
-                        : 'border-red-500 bg-red-500/20'
-                      : 'border-white/10 bg-white/5 hover:bg-white/10',
+                      ? 'border-transparent ring-2 ring-offset-1 ring-offset-background'
+                      : 'border-border hover:border-border/80 bg-card/50',
+                    isSelected && colors.bgLight
                   )}
+                  style={{
+                    boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined,
+                  }}
                 >
-                  <div className="text-sm font-semibold text-white">{outcome}</div>
-                  <div className={cn(
-                    'text-2xl font-bold',
-                    isYes ? 'text-emerald-400' : 'text-red-400'
-                  )}>
-                    {Math.round(price * 100)}%
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: baseColor }} />
+                    <span className="font-medium">{outcome}</span>
                   </div>
+                  <span className="font-mono font-medium">{(price * 100).toFixed(1)}%</span>
                 </button>
               )
             })}
           </div>
+        </div>
 
-          {/* Wallet Connection or Bet UI */}
-          {!isConnected ? (
-            <button
-              onClick={() => login()}
-              disabled={isWalletLoading}
-              className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded-xl font-semibold text-white transition-colors flex items-center justify-center gap-2"
-            >
-              {isWalletLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Wallet className="w-4 h-4" />
-              )}
-              Connect Wallet
-            </button>
-          ) : selectedOutcome !== null ? (
-            <>
-              {/* Bet Amount Buttons */}
+        {/* Wallet Connection or Trade UI */}
+        {!isConnected ? (
+          <button
+            onClick={login}
+            disabled={isWalletLoading}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {isWalletLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
+            Connect Wallet
+          </button>
+        ) : (
+          <>
+            {/* Amount Input */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm text-muted-foreground">Amount (USDC)</label>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Wallet className="h-3 w-3" />
+                  Balance: {usdcBalance !== undefined ? Number(formatUSDC(usdcBalance)).toFixed(2) : '0'} USDC
+                </span>
+              </div>
+              
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full rounded-lg border border-border bg-background py-2.5 pl-9 pr-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              {/* Quick amounts */}
               <div className="flex gap-2">
-                {BET_AMOUNTS.map((amount) => (
+                {BET_AMOUNTS.map((amt) => (
                   <button
-                    key={amount}
-                    onClick={() => setBetAmount(amount)}
+                    key={amt}
+                    onClick={() => handleQuickAmount(amt)}
                     className={cn(
-                      'flex-1 py-2 rounded-lg font-semibold text-sm transition-all',
-                      betAmount === amount
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      'flex-1 rounded-md border py-1.5 text-sm font-medium transition-colors',
+                      amount === amt.toString()
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-muted/30 text-foreground hover:bg-muted/50'
                     )}
                   >
-                    ${amount}
+                    ${amt}
                   </button>
                 ))}
               </div>
 
-              {/* Estimated Return */}
-              {betAmount && estimatedShares > 0n && (
-                <div className="text-xs text-white/60 text-center">
-                  Est. {Number(formatUnits(estimatedShares, 18)).toFixed(2)} shares
-                  {' • '}
-                  Potential ${(Number(formatUnits(estimatedShares, 18))).toFixed(2)} payout
-                </div>
-              )}
-
-              {/* Buy Button */}
-              <button
-                onClick={handleBuy}
-                disabled={!betAmount || isLoading}
-                className={cn(
-                  'w-full py-3 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2',
-                  betAmount
-                    ? selectedOutcome === 0
-                      ? 'bg-emerald-600 hover:bg-emerald-700'
-                      : 'bg-red-600 hover:bg-red-700'
-                    : 'bg-white/20 cursor-not-allowed'
-                )}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    {isConfirming ? 'Confirming...' : 'Processing...'}
-                  </>
-                ) : txSuccess ? (
-                  '✓ Bet Placed!'
-                ) : betAmount ? (
-                  `Buy ${market.outcomes[selectedOutcome]} for $${betAmount}`
-                ) : (
-                  'Select Amount'
-                )}
-              </button>
-            </>
-          ) : (
-            <div className="text-center text-white/50 text-sm py-2">
-              Select an outcome to bet
+              {/* Percentage buttons */}
+              <div className="flex gap-2">
+                {[0.25, 0.5, 1].map((pct) => (
+                  <button
+                    key={pct}
+                    onClick={() => handlePercentage(pct)}
+                    className="flex-1 rounded-md border border-border bg-muted/30 py-1.5 text-sm font-medium text-foreground hover:bg-muted/50"
+                  >
+                    {pct * 100}%
+                  </button>
+                ))}
+              </div>
             </div>
-          )}
-        </div>
 
-        {/* Footer */}
-        <div className="flex justify-between items-center px-3 py-2 bg-white/5 border-t border-white/10 text-xs text-white/50">
-          <div>
-            {isConnected && usdcBalance !== undefined && (
-              <span>💰 ${Number(formatUSDC(usdcBalance)).toFixed(2)}</span>
-            )}
-          </div>
-          <div>
-            ⏱️ {timeRemaining || '--:--'}
-          </div>
-        </div>
+            {/* Buy Button */}
+            <button
+              onClick={handleBuy}
+              disabled={!amountValue || selectedOutcome === null || isLoading}
+              className={cn(
+                'flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold text-white transition-all disabled:cursor-not-allowed disabled:opacity-50',
+                selectedOutcome === 0 ? 'bg-emerald-600 hover:bg-emerald-500' : 
+                selectedOutcome === 1 ? 'bg-rose-600 hover:bg-rose-500' : 
+                'bg-primary'
+              )}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {isConfirming ? 'Confirming...' : 'Processing...'}
+                </>
+              ) : txSuccess ? (
+                'Bet Placed!'
+              ) : (
+                'Buy'
+              )}
+            </button>
+
+            {/* Order Summary */}
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between text-muted-foreground">
+                <span>Price per share</span>
+                <span className="text-foreground">${pricePerShare.toFixed(4)}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Est. Shares</span>
+                <span className="text-foreground">{estShares.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Payout if win</span>
+                <span className={cn("font-medium", potentialReturnPct >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                  ${potentialReturn.toFixed(2)} ({potentialReturnPct >= 0 ? '+' : ''}{potentialReturnPct.toFixed(0)}%)
+                </span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
-    </div>
+    </PanelWrapper>
   )
 }
-
