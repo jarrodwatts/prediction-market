@@ -3,11 +3,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSession, signIn, signOut } from 'next-auth/react'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
-import { Twitch, Wallet, CheckCircle } from 'lucide-react'
+import { Twitch, Wallet, CheckCircle, Loader2, Zap, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+
+type SubscriptionStatus = 
+  | { state: 'idle' }
+  | { state: 'loading' }
+  | { state: 'success'; count: number; total: number }
+  | { state: 'error'; message: string }
 
 export default function StreamerDashboard() {
   const { data: session } = useSession()
@@ -37,7 +42,7 @@ export default function StreamerDashboard() {
     }
   }, [session, walletAddress])
 
-  const [subscribeStatus, setSubscribeStatus] = useState<string | null>(null)
+  const [subscribeStatus, setSubscribeStatus] = useState<SubscriptionStatus>({ state: 'idle' })
 
   const saveWalletAddress = async () => {
     if (!walletAddress || !session?.twitchId) return
@@ -56,7 +61,7 @@ export default function StreamerDashboard() {
       })
 
       // Register EventSub subscriptions
-      setSubscribeStatus('Subscribing to Twitch events...')
+      setSubscribeStatus({ state: 'loading' })
       const subRes = await fetch('/api/twitch/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -65,15 +70,20 @@ export default function StreamerDashboard() {
 
       const subData = await subRes.json()
       if (subRes.ok && subData.success) {
-        setSubscribeStatus(subData.message || 'Subscribed to Twitch events.')
+        const successCount = subData.results?.filter((r: { success: boolean }) => r.success).length ?? 0
+        const totalCount = subData.results?.length ?? 4
+        setSubscribeStatus({ state: 'success', count: successCount, total: totalCount })
         console.log('EventSub subscriptions:', subData.results)
       } else {
-        setSubscribeStatus(subData.error || subData.message || 'Failed to subscribe to Twitch events.')
+        setSubscribeStatus({ 
+          state: 'error', 
+          message: subData.error || subData.message || 'Failed to subscribe to Twitch events.' 
+        })
         console.error('EventSub subscription failed:', subData)
       }
     } catch (error) {
       console.error('Failed to save wallet:', error)
-      setSubscribeStatus('Failed to complete setup.')
+      setSubscribeStatus({ state: 'error', message: 'Failed to complete setup. Please try again.' })
     }
   }
 
@@ -202,11 +212,91 @@ export default function StreamerDashboard() {
                 </div>
               </div>
 
-              {subscribeStatus && (
-                <Alert className="bg-background">
-                  <AlertTitle>Twitch subscriptions</AlertTitle>
-                  <AlertDescription>{subscribeStatus}</AlertDescription>
-                </Alert>
+              {/* Subscription Status */}
+              {subscribeStatus.state !== 'idle' && (
+                <div className="rounded-lg border bg-card p-5">
+                  {subscribeStatus.state === 'loading' && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                        <div>
+                          <p className="font-medium">Setting up automation...</p>
+                          <p className="text-sm text-muted-foreground">
+                            Connecting to Twitch to listen for your predictions
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {subscribeStatus.state === 'success' && (
+                    <div className="space-y-4">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600/15">
+                          <Zap className="h-5 w-5 text-emerald-500" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-emerald-500">Automation active</p>
+                            <Badge className="bg-emerald-600/15 text-emerald-500 hover:bg-emerald-600/15 border-0">
+                              {subscribeStatus.count}/{subscribeStatus.total} events
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            Markets will be created automatically when you start a prediction on Twitch
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="rounded-md bg-muted/50 p-3">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                          Listening for
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            <span className="text-muted-foreground">Prediction started</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            <span className="text-muted-foreground">Betting progress</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            <span className="text-muted-foreground">Betting locked</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            <span className="text-muted-foreground">Prediction resolved</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {subscribeStatus.state === 'error' && (
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/15">
+                        <AlertCircle className="h-5 w-5 text-destructive" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-destructive">Setup failed</p>
+                        <p className="text-sm text-muted-foreground">{subscribeStatus.message}</p>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="mt-2"
+                          onClick={() => {
+                            setSubscribeStatus({ state: 'idle' })
+                            saveWalletAddress()
+                          }}
+                        >
+                          Try again
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
