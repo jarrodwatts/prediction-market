@@ -1,17 +1,11 @@
 "use client";
 
-/**
- * Market Header Component
- *
- * Displays the market title, image, volume, and expiry information.
- * Used at the top of the market detail page.
- */
-
 import { useState } from "react";
 import Image from "next/image";
 import { formatCompact, formatTimeRemaining, formatShortDate } from "@/lib/formatters";
 import type { MarketData } from "@/lib/types";
-import { formatEther } from "viem";
+import { formatUnits } from "viem";
+import { USDC } from "@/lib/tokens";
 import { Trophy, BarChart3 } from "lucide-react";
 
 interface MarketHeaderProps {
@@ -51,7 +45,7 @@ export function MarketHeader({ market }: MarketHeaderProps) {
           <span className="flex items-center gap-1">
             <Trophy className="w-3.5 h-3.5" />
             <span className="font-medium text-foreground">
-              {formatCompact(Number(formatEther(market.volume || 0n)), { prefix: '' })} Vol
+              {formatCompact(Number(formatUnits(market.totalPot || 0n, USDC.decimals)), { prefix: '$' })} Vol
             </span>
           </span>
           <span>|</span>

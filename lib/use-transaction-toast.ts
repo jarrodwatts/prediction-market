@@ -5,13 +5,9 @@ import { toast } from "sonner"
 import { parseError, isUserRejection } from "@/lib/errors"
 
 type TransactionType = 
-  | "buy" 
-  | "sell" 
-  | "addLiquidity" 
-  | "removeLiquidity" 
-  | "claimFees" 
-  | "claimLiquidity"
+  | "bet"
   | "claimWinnings"
+  | "claimRefund"
   | "approve"
 
 interface TransactionMessages {
@@ -21,40 +17,20 @@ interface TransactionMessages {
 }
 
 const transactionMessages: Record<TransactionType, TransactionMessages> = {
-  buy: {
-    pending: { title: "Processing Purchase", description: "Your buy order is being confirmed..." },
-    success: { title: "Purchase Complete", description: "You've successfully bought shares" },
-    error: { title: "Purchase Failed", description: "Unable to complete your buy order" },
-  },
-  sell: {
-    pending: { title: "Processing Sale", description: "Your sell order is being confirmed..." },
-    success: { title: "Sale Complete", description: "You've successfully sold shares" },
-    error: { title: "Sale Failed", description: "Unable to complete your sell order" },
-  },
-  addLiquidity: {
-    pending: { title: "Adding Liquidity", description: "Your deposit is being processed..." },
-    success: { title: "Liquidity Added", description: "You're now earning fees as an LP" },
-    error: { title: "Deposit Failed", description: "Unable to add liquidity" },
-  },
-  removeLiquidity: {
-    pending: { title: "Withdrawing Liquidity", description: "Your withdrawal is being processed..." },
-    success: { title: "Liquidity Withdrawn", description: "Your funds have been returned" },
-    error: { title: "Withdrawal Failed", description: "Unable to remove liquidity" },
-  },
-  claimFees: {
-    pending: { title: "Claiming Fees", description: "Collecting your earned fees..." },
-    success: { title: "Fees Claimed", description: "Your earnings have been transferred" },
-    error: { title: "Claim Failed", description: "Unable to claim fees" },
-  },
-  claimLiquidity: {
-    pending: { title: "Claiming Liquidity", description: "Collecting your liquidity..." },
-    success: { title: "Liquidity Claimed", description: "Your liquidity has been returned" },
-    error: { title: "Claim Failed", description: "Unable to claim liquidity" },
+  bet: {
+    pending: { title: "Placing Bet", description: "Your bet is being confirmed..." },
+    success: { title: "Bet Placed", description: "Your bet has been successfully placed" },
+    error: { title: "Bet Failed", description: "Unable to place your bet" },
   },
   claimWinnings: {
     pending: { title: "Claiming Winnings", description: "Collecting your winnings..." },
     success: { title: "Winnings Claimed", description: "Your winnings have been transferred" },
     error: { title: "Claim Failed", description: "Unable to claim winnings" },
+  },
+  claimRefund: {
+    pending: { title: "Claiming Refund", description: "Processing your refund..." },
+    success: { title: "Refund Claimed", description: "Your funds have been returned" },
+    error: { title: "Refund Failed", description: "Unable to claim refund" },
   },
   approve: {
     pending: { title: "Approving USDC", description: "Granting spend permission..." },
@@ -157,56 +133,3 @@ export function useTransactionToast() {
     dismiss,
   }
 }
-
-// Standalone toast functions for simple use cases
-export const txToast = {
-  success: (title: string, description?: string) => {
-    toast.success(title, { description })
-  },
-  error: (title: string, descriptionOrError?: string | unknown) => {
-    // If second argument is a string, use it directly
-    if (typeof descriptionOrError === "string") {
-      toast.error(title, { description: descriptionOrError })
-      return
-    }
-    // If it's an error object, parse it
-    if (descriptionOrError) {
-      const parsed = parseError(descriptionOrError, title)
-      toast.error(parsed.title, {
-        description: parsed.suggestion 
-          ? `${parsed.message} ${parsed.suggestion}`
-          : parsed.message,
-      })
-    } else {
-      toast.error(title)
-    }
-  },
-  /** Show a user-friendly error toast from any error */
-  fromError: (error: unknown, context?: string) => {
-    if (isUserRejection(error)) {
-      toast.info("Transaction Cancelled", {
-        description: "You cancelled the transaction.",
-      })
-      return
-    }
-    const parsed = parseError(error, context)
-    toast.error(parsed.title, {
-      description: parsed.suggestion 
-        ? `${parsed.message} ${parsed.suggestion}`
-        : parsed.message,
-    })
-  },
-  info: (title: string, description?: string) => {
-    toast.info(title, { description })
-  },
-  warning: (title: string, description?: string) => {
-    toast.warning(title, { description })
-  },
-  loading: (title: string, description?: string) => {
-    return toast.loading(title, { description })
-  },
-  dismiss: (id: string | number) => {
-    toast.dismiss(id)
-  },
-}
-

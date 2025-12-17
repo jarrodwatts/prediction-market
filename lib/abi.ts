@@ -1,22 +1,21 @@
+/**
+ * Prediction Market Contract ABI
+ */
 export const PREDICTION_MARKET_ABI = [
   {
     "type": "constructor",
     "inputs": [
       {
-        "name": "_WETH",
+        "name": "_protocolTreasury",
         "type": "address",
-        "internalType": "contract IWETH"
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
   },
   {
-    "type": "receive",
-    "stateMutability": "payable"
-  },
-  {
     "type": "function",
-    "name": "MAX_FEE",
+    "name": "MAX_FEE_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -42,132 +41,20 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "WETH",
+    "name": "MIN_BET",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "address",
-        "internalType": "contract IWETH"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "addLiquidity",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "addLiquidityWithETH",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "adminPauseMarket",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "adminResolveMarketOutcome",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "adminSetMarketCloseDate",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "closesAt",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "adminUnpauseMarket",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "creatorLockMarket",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "buy",
+    "name": "bet",
     "inputs": [
       {
         "name": "marketId",
@@ -179,109 +66,10 @@ export const PREDICTION_MARKET_ABI = [
         "type": "uint256",
         "internalType": "uint256"
       },
-      {
-        "name": "minOutcomeSharesToBuy",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "buyWithETH",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "minOutcomeSharesToBuy",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "calcBuyAmount",
-    "inputs": [
       {
         "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "calcSellAmount",
-    "inputs": [
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "outcomeTokenSellAmount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "claimFees",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -289,64 +77,7 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "claimFeesToETH",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "claimLiquidity",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "claimLiquidityToETH",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "claimVoidedOutcomeShares",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "claimVoidedOutcomeSharesToETH",
+    "name": "claimRefund",
     "inputs": [
       {
         "name": "marketId",
@@ -377,10 +108,76 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "claimWinningsToETH",
+    "name": "createMarket",
     "inputs": [
       {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct PredictionMarket.CreateMarketParams",
+        "components": [
+          {
+            "name": "question",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "image",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "outcomeCount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "closesAt",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "protocolFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "creatorFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "creator",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
         "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "emergencyWithdraw",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -390,296 +187,56 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "createMarket",
-    "inputs": [
-      {
-        "name": "desc",
-        "type": "tuple",
-        "internalType": "struct PredictionMarket.CreateMarketDescription",
-        "components": [
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "closesAt",
-            "type": "uint32",
-            "internalType": "uint32"
-          },
-          {
-            "name": "outcomes",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "token",
-            "type": "address",
-            "internalType": "contract IERC20"
-          },
-          {
-            "name": "distribution",
-            "type": "uint256[]",
-            "internalType": "uint256[]"
-          },
-          {
-            "name": "question",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "image",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "buyFees",
-            "type": "tuple",
-            "internalType": "struct PredictionMarket.Fees",
-            "components": [
-              {
-                "name": "fee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "treasuryFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "distributorFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "sellFees",
-            "type": "tuple",
-            "internalType": "struct PredictionMarket.Fees",
-            "components": [
-              {
-                "name": "fee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "treasuryFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "distributorFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "treasury",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "distributor",
-            "type": "address",
-            "internalType": "address"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "createMarketWithETH",
-    "inputs": [
-      {
-        "name": "desc",
-        "type": "tuple",
-        "internalType": "struct PredictionMarket.CreateMarketDescription",
-        "components": [
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "closesAt",
-            "type": "uint32",
-            "internalType": "uint32"
-          },
-          {
-            "name": "outcomes",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "token",
-            "type": "address",
-            "internalType": "contract IERC20"
-          },
-          {
-            "name": "distribution",
-            "type": "uint256[]",
-            "internalType": "uint256[]"
-          },
-          {
-            "name": "question",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "image",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "buyFees",
-            "type": "tuple",
-            "internalType": "struct PredictionMarket.Fees",
-            "components": [
-              {
-                "name": "fee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "treasuryFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "distributorFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "sellFees",
-            "type": "tuple",
-            "internalType": "struct PredictionMarket.Fees",
-            "components": [
-              {
-                "name": "fee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "treasuryFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "distributorFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "treasury",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "distributor",
-            "type": "address",
-            "internalType": "address"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "getMarketAltData",
+    "name": "getClaimableAmount",
     "inputs": [
       {
         "name": "marketId",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "buyFee",
+        "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "questionId",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "questionIdUint",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "buyTreasuryFee",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "treasury",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "realitio",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "realitioTimeout",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "manager",
-        "type": "address",
-        "internalType": "address"
+        "name": "canClaim",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "getMarketBuyFee",
+    "name": "getIndicativePayout",
     "inputs": [
       {
         "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "payout",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -688,7 +245,7 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "getMarketCreator",
+    "name": "getIndicativePrices",
     "inputs": [
       {
         "name": "marketId",
@@ -698,9 +255,9 @@ export const PREDICTION_MARKET_ABI = [
     ],
     "outputs": [
       {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
+        "name": "prices",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
       }
     ],
     "stateMutability": "view"
@@ -727,118 +284,41 @@ export const PREDICTION_MARKET_ABI = [
         "internalType": "uint256"
       },
       {
-        "name": "liquidity",
+        "name": "totalPot",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "balance",
+        "name": "outcomeCount",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "sharesAvailable",
+        "name": "resolvedOutcome",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "resolvedOutcomeId",
-        "type": "int256",
-        "internalType": "int256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketFee",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketFees",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "buyFees",
-        "type": "tuple",
-        "internalType": "struct PredictionMarket.Fees",
-        "components": [
-          {
-            "name": "fee",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "treasuryFee",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "distributorFee",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      },
-      {
-        "name": "sellFees",
-        "type": "tuple",
-        "internalType": "struct PredictionMarket.Fees",
-        "components": [
-          {
-            "name": "fee",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "treasuryFee",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "distributorFee",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      },
-      {
-        "name": "treasury",
+        "name": "creator",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "distributor",
-        "type": "address",
-        "internalType": "address"
+        "name": "protocolFeeBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "creatorFeeBps",
+        "type": "uint16",
+        "internalType": "uint16"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "getMarketLiquidityPrice",
+    "name": "getMarketPools",
     "inputs": [
       {
         "name": "marketId",
@@ -848,60 +328,7 @@ export const PREDICTION_MARKET_ABI = [
     ],
     "outputs": [
       {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketOutcomeData",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "price",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "availableShares",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "totalShares",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketOutcomeIds",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
+        "name": "pools",
         "type": "uint256[]",
         "internalType": "uint256[]"
       }
@@ -910,7 +337,7 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "getMarketOutcomePrice",
+    "name": "getOutcomePool",
     "inputs": [
       {
         "name": "marketId",
@@ -934,144 +361,7 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "getMarketOutcomesShares",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketPaused",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketPrices",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomes",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketResolvedOutcome",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "int256",
-        "internalType": "int256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketSellFee",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarketShares",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomes",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getMarkets",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getUserClaimStatus",
+    "name": "getUserShares",
     "inputs": [
       {
         "name": "marketId",
@@ -1086,104 +376,7 @@ export const PREDICTION_MARKET_ABI = [
     ],
     "outputs": [
       {
-        "name": "winningsToClaim",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "winningsClaimed",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "liquidityToClaim",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "liquidityClaimed",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "claimableFees",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getUserClaimableFees",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "user",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getUserLiquidityPoolShare",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "user",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getUserMarketShares",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "user",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomes",
+        "name": "shares",
         "type": "uint256[]",
         "internalType": "uint256[]"
       }
@@ -1192,12 +385,22 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "isMarketVoided",
+    "name": "hasClaimed",
     "inputs": [
       {
         "name": "marketId",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "outcomeId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
@@ -1211,13 +414,100 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "marketIndex",
+    "name": "lockMarket",
+    "inputs": [
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "marketCount",
     "inputs": [],
     "outputs": [
       {
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "markets",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "question",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "image",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "outcomeCount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "closesAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "totalPot",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "resolvedOutcome",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "payoutPerShare",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "state",
+        "type": "uint8",
+        "internalType": "enum PredictionMarket.MarketState"
+      },
+      {
+        "name": "creator",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "protocolFeeBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "creatorFeeBps",
+        "type": "uint16",
+        "internalType": "uint16"
       }
     ],
     "stateMutability": "view"
@@ -1237,166 +527,16 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "referralBuy",
-    "inputs": [
+    "name": "protocolTreasury",
+    "inputs": [],
+    "outputs": [
       {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "minOutcomeSharesToBuy",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "code",
-        "type": "string",
-        "internalType": "string"
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "referralBuyWithETH",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "minOutcomeSharesToBuy",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "code",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "referralSell",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maxOutcomeSharesToSell",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "code",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "referralSellToETH",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maxOutcomeSharesToSell",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "code",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "removeLiquidity",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "shares",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "removeLiquidityToETH",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "shares",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -1407,7 +547,7 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "sell",
+    "name": "resolve",
     "inputs": [
       {
         "name": "marketId",
@@ -1415,17 +555,7 @@ export const PREDICTION_MARKET_ABI = [
         "internalType": "uint256"
       },
       {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maxOutcomeSharesToSell",
+        "name": "winningOutcome",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1435,27 +565,12 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "sellToETH",
+    "name": "setProtocolTreasury",
     "inputs": [
       {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maxOutcomeSharesToSell",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "_treasury",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -1476,299 +591,10 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "function",
-    "name": "updateMarket",
+    "name": "voidMarket",
     "inputs": [
       {
         "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "update",
-        "type": "tuple",
-        "internalType": "struct PredictionMarket.MarketUpdateDescription",
-        "components": [
-          {
-            "name": "closesAtTimestamp",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "balance",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "liquidity",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "sharesAvailable",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "state",
-            "type": "uint8",
-            "internalType": "enum PredictionMarket.MarketState"
-          },
-          {
-            "name": "resolvedOutcomeId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "feesPoolWeight",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "feesTreasury",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "feesDistributor",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "buyFees",
-            "type": "tuple",
-            "internalType": "struct PredictionMarket.Fees",
-            "components": [
-              {
-                "name": "fee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "treasuryFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "distributorFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "sellFees",
-            "type": "tuple",
-            "internalType": "struct PredictionMarket.Fees",
-            "components": [
-              {
-                "name": "fee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "treasuryFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "distributorFee",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "outcomeCount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "token",
-            "type": "address",
-            "internalType": "contract IERC20"
-          },
-          {
-            "name": "creator",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "paused",
-            "type": "bool",
-            "internalType": "bool"
-          }
-        ]
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "updateMarketFeesHolders",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "updates",
-        "type": "tuple[]",
-        "internalType": "struct PredictionMarket.MarketFeesHolderUpdateDescription[]",
-        "components": [
-          {
-            "name": "holder",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amount",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "updateMarketLiquidityHolders",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "updates",
-        "type": "tuple[]",
-        "internalType": "struct PredictionMarket.MarketLiquidityHolderUpdateDescription[]",
-        "components": [
-          {
-            "name": "holder",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "claim",
-            "type": "bool",
-            "internalType": "bool"
-          }
-        ]
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "updateMarketOutcome",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "update",
-        "type": "tuple",
-        "internalType": "struct PredictionMarket.MarketOutcomeUpdateDescription",
-        "components": [
-          {
-            "name": "id",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "marketId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "sharesTotal",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "sharesAvailable",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "updateMarketOutcomeHolders",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "updates",
-        "type": "tuple[]",
-        "internalType": "struct PredictionMarket.MarketOutcomeHolderUpdateDescription[]",
-        "components": [
-          {
-            "name": "holder",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "claim",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "voidedClaim",
-            "type": "bool",
-            "internalType": "bool"
-          }
-        ]
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "withdraw",
-    "inputs": [
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1778,19 +604,13 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "event",
-    "name": "MarketActionTx",
+    "name": "BetPlaced",
     "inputs": [
       {
         "name": "user",
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      },
-      {
-        "name": "action",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "enum PredictionMarket.MarketAction"
       },
       {
         "name": "marketId",
@@ -1800,49 +620,18 @@ export const PREDICTION_MARKET_ABI = [
       },
       {
         "name": "outcomeId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
       },
       {
         "name": "shares",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "timestamp",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "MarketCloseDateEdited",
-    "inputs": [
-      {
-        "name": "user",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "closesAtTimestamp",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -1861,7 +650,7 @@ export const PREDICTION_MARKET_ABI = [
     "name": "MarketCreated",
     "inputs": [
       {
-        "name": "user",
+        "name": "creator",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -1873,7 +662,7 @@ export const PREDICTION_MARKET_ABI = [
         "internalType": "uint256"
       },
       {
-        "name": "outcomes",
+        "name": "outcomeCount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -1894,110 +683,17 @@ export const PREDICTION_MARKET_ABI = [
         "name": "token",
         "type": "address",
         "indexed": false,
-        "internalType": "contract IERC20"
+        "internalType": "address"
       }
     ],
     "anonymous": false
   },
   {
     "type": "event",
-    "name": "MarketLiquidity",
+    "name": "MarketLocked",
     "inputs": [
       {
-        "name": "marketId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "price",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "timestamp",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "MarketOutcomePrice",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "timestamp",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "MarketOutcomeShares",
-    "inputs": [
-      {
-        "name": "marketId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "timestamp",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "outcomeShares",
-        "type": "uint256[]",
-        "indexed": false,
-        "internalType": "uint256[]"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "MarketPaused",
-    "inputs": [
-      {
-        "name": "user",
+        "name": "locker",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -2007,12 +703,6 @@ export const PREDICTION_MARKET_ABI = [
         "type": "uint256",
         "indexed": true,
         "internalType": "uint256"
-      },
-      {
-        "name": "paused",
-        "type": "bool",
-        "indexed": false,
-        "internalType": "bool"
       },
       {
         "name": "timestamp",
@@ -2028,7 +718,7 @@ export const PREDICTION_MARKET_ABI = [
     "name": "MarketResolved",
     "inputs": [
       {
-        "name": "user",
+        "name": "resolver",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -2040,7 +730,25 @@ export const PREDICTION_MARKET_ABI = [
         "internalType": "uint256"
       },
       {
-        "name": "outcomeId",
+        "name": "winningOutcome",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "totalPot",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "protocolFee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "creatorFee",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -2050,12 +758,31 @@ export const PREDICTION_MARKET_ABI = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarketVoided",
+    "inputs": [
+      {
+        "name": "resolver",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
       },
       {
-        "name": "admin",
-        "type": "bool",
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
         "indexed": false,
-        "internalType": "bool"
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -2081,7 +808,7 @@ export const PREDICTION_MARKET_ABI = [
   },
   {
     "type": "event",
-    "name": "Referral",
+    "name": "RefundClaimed",
     "inputs": [
       {
         "name": "user",
@@ -2096,25 +823,50 @@ export const PREDICTION_MARKET_ABI = [
         "internalType": "uint256"
       },
       {
-        "name": "code",
-        "type": "string",
-        "indexed": false,
-        "internalType": "string"
-      },
-      {
-        "name": "action",
-        "type": "uint8",
-        "indexed": false,
-        "internalType": "enum PredictionMarket.MarketAction"
-      },
-      {
         "name": "outcomeId",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
       },
       {
-        "name": "value",
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "WinningsClaimed",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "marketId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "payout",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -2129,3 +881,13 @@ export const PREDICTION_MARKET_ABI = [
     "anonymous": false
   }
 ] as const;
+
+/**
+ * Market State enum matching the contract
+ */
+export enum MarketState {
+  Open = 0,
+  Locked = 1,
+  Resolved = 2,
+  Voided = 3,
+}

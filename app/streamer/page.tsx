@@ -1,6 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+/**
+ * Streamer Dashboard - Extension Setup
+ *
+ * Setup page for streamers to connect Twitch and wallet.
+ * Refactored to use useMemo for derived state and cleaner patterns.
+ */
+
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import { useSession, signIn, signOut } from 'next-auth/react'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
 import { Twitch, Wallet, CheckCircle, Loader2, Zap, AlertCircle } from 'lucide-react'
@@ -18,38 +25,36 @@ export default function StreamerDashboard() {
   const { data: session } = useSession()
   const { login } = useLoginWithAbstract()
   const { data: abstractClient } = useAbstractClient()
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
-  const [step, setStep] = useState(1)
-  const saveWalletCallCountRef = useRef(0)
-
-  // Update wallet address when AGW client changes
-  useEffect(() => {
-    if (abstractClient?.account?.address) {
-      setWalletAddress(abstractClient.account.address)
-    } else {
-      setWalletAddress(null)
-    }
-  }, [abstractClient])
-
-  // Determine current step
-  useEffect(() => {
-    if (session?.twitchId && walletAddress) {
-      setStep(3) // Complete
-    } else if (session?.twitchId) {
-      setStep(2) // Connect wallet
-    } else {
-      setStep(1) // Connect Twitch
-    }
-  }, [session, walletAddress])
-
   const [subscribeStatus, setSubscribeStatus] = useState<SubscriptionStatus>({ state: 'idle' })
+  
+  // Track if we've already saved for this wallet+session combo
+  const savedRef = useRef<string | null>(null)
 
-  const saveWalletAddress = async () => {
+  // Derive wallet address directly from SDK state
+  const walletAddress = abstractClient?.account?.address ?? null
+
+  // Derive current step from session and wallet state - no useEffect needed
+  const step = useMemo(() => {
+    if (session?.twitchId && walletAddress) {
+      return 3 // Complete
+    } else if (session?.twitchId) {
+      return 2 // Connect wallet
+    }
+    return 1 // Connect Twitch
+  }, [session?.twitchId, walletAddress])
+
+  // Save wallet and subscribe to EventSub
+  const saveWalletAddress = useCallback(async () => {
     if (!walletAddress || !session?.twitchId) return
+    
+    // Create a unique key for this wallet+session combo
+    const saveKey = `${walletAddress}-${session.twitchId}`
+    
+    // Skip if we've already saved for this combination
+    if (savedRef.current === saveKey) return
+    savedRef.current = saveKey
 
     try {
-      saveWalletCallCountRef.current += 1
-
       // Save wallet address
       await fetch('/api/streamer/settings', {
         method: 'POST',
@@ -73,26 +78,33 @@ export default function StreamerDashboard() {
         const successCount = subData.results?.filter((r: { success: boolean }) => r.success).length ?? 0
         const totalCount = subData.results?.length ?? 4
         setSubscribeStatus({ state: 'success', count: successCount, total: totalCount })
-        console.log('EventSub subscriptions:', subData.results)
       } else {
         setSubscribeStatus({ 
           state: 'error', 
           message: subData.error || subData.message || 'Failed to subscribe to Twitch events.' 
         })
-        console.error('EventSub subscription failed:', subData)
       }
-    } catch (error) {
-      console.error('Failed to save wallet:', error)
+    } catch {
       setSubscribeStatus({ state: 'error', message: 'Failed to complete setup. Please try again.' })
+      // Reset the saved ref so user can retry
+      savedRef.current = null
     }
-  }
+  }, [walletAddress, session?.twitchId])
 
-  // Save wallet when connected
+  // Save wallet when both wallet and session are available
+  // Using a ref to track if we've already saved prevents duplicate calls
   useEffect(() => {
     if (walletAddress && session?.twitchId) {
       saveWalletAddress()
     }
-  }, [walletAddress, session])
+  }, [walletAddress, session?.twitchId, saveWalletAddress])
+
+  // Retry handler that resets the saved ref
+  const handleRetry = useCallback(() => {
+    savedRef.current = null
+    setSubscribeStatus({ state: 'idle' })
+    saveWalletAddress()
+  }, [saveWalletAddress])
 
   return (
     <div className="mx-auto max-w-7xl py-8 space-y-8 px-6">
@@ -145,7 +157,7 @@ export default function StreamerDashboard() {
                         {step > 1 && <Badge variant="secondary">Connected</Badge>}
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        We’ll sync your channel and automate prediction setup.
+                        We&apos;ll sync your channel and automate prediction setup.
                       </p>
                       {step > 1 && (
                         <p className="mt-2 text-sm text-muted-foreground">
@@ -286,10 +298,7 @@ export default function StreamerDashboard() {
                           variant="outline" 
                           size="sm" 
                           className="mt-2"
-                          onClick={() => {
-                            setSubscribeStatus({ state: 'idle' })
-                            saveWalletAddress()
-                          }}
+                          onClick={handleRetry}
                         >
                           Try again
                         </Button>

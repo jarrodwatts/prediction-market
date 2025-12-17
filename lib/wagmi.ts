@@ -1,23 +1,19 @@
 import { createConfig, http } from 'wagmi'
-import { type Chain } from 'viem'
+import { abstract, abstractTestnet } from 'viem/chains'
 
-export const abstractTestnet = {
-  id: 11124,
-  name: 'Abstract Testnet',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-  rpcUrls: {
-    default: { http: ['https://api.testnet.abs.xyz'] },
-  },
-  blockExplorers: {
-    default: { name: 'Abscan', url: 'https://sepolia.abscan.org' },
-  },
-  testnet: true,
-} as const satisfies Chain
+// Active chain - controlled by environment variable
+// Set NEXT_PUBLIC_NETWORK=mainnet to use mainnet
+const isMainnet = process.env.NEXT_PUBLIC_NETWORK === 'mainnet'
+export const activeChain = isMainnet ? abstract : abstractTestnet
 
 export const config = createConfig({
-  chains: [abstractTestnet],
+  chains: [abstractTestnet, abstract],
   transports: {
     [abstractTestnet.id]: http(),
+    [abstract.id]: http(),
   },
   ssr: true,
 })
+
+// Re-export for convenience
+export { abstract as abstractMainnet, abstractTestnet }

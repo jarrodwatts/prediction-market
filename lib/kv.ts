@@ -1,4 +1,5 @@
-import { kv } from '@vercel/kv'
+import { kvResilient } from './kv-resilient'
+import { TTL } from './config'
 
 /**
  * Prediction data stored in KV
@@ -11,7 +12,8 @@ export interface PredictionData {
   outcomeMap: Record<string, number> // Twitch outcome ID -> our index
   locksAt: number // Unix timestamp
   createdAt: number
-  state?: 'pending' | 'active' | 'locked' | 'resolved' // Track state for fast responses
+  state?: 'pending' | 'active' | 'locked' | 'resolved' | 'failed' // Track state for fast responses
+  pendingLock?: boolean // Flag if lock event received before market created
 }
 
 /**
@@ -20,7 +22,6 @@ export interface PredictionData {
  */
 export interface ChannelConfig {
   walletAddress: string
-  defaultLiquidity: string // USDC amount as string
 }
 
 /**
@@ -32,20 +33,20 @@ export async function storePredictionMapping(
   data: PredictionData
 ): Promise<void> {
   // Store with 24h TTL (predictions should resolve within this time)
-  await kv.set(
+  await kvResilient.set(
     `prediction:${twitchPredictionId}`,
     {
       ...data,
       marketId: data.marketId?.toString() ?? null, // BigInt can't be serialized directly
     },
-    { ex: 86400 }
+    { ex: TTL.PREDICTION }
   )
-  
+
   // Also store active prediction for the channel
-  await kv.set(
+  await kvResilient.set(
     `channel:${data.channelId}:active_prediction`,
     twitchPredictionId,
-    { ex: 86400 }
+    { ex: TTL.PREDICTION }
   )
 }
 
@@ -59,14 +60,14 @@ export async function updatePredictionMapping(
   const existing = await getPredictionData(twitchPredictionId)
   if (!existing) return
   
-  await kv.set(
+  await kvResilient.set(
     `prediction:${twitchPredictionId}`,
     {
       ...existing,
       ...updates,
       marketId: updates.marketId?.toString() ?? existing.marketId?.toString() ?? null,
     },
-    { ex: 86400 }
+    { ex: TTL.PREDICTION }
   )
 }
 
@@ -76,7 +77,7 @@ export async function updatePredictionMapping(
 export async function getPredictionData(
   twitchPredictionId: string
 ): Promise<PredictionData | null> {
-  const data = await kv.get<Omit<PredictionData, 'marketId'> & { marketId: string | null }>(
+  const data = await kvResilient.get<Omit<PredictionData, 'marketId'> & { marketId: string | null }>(
     `prediction:${twitchPredictionId}`
   )
   
@@ -94,14 +95,14 @@ export async function getPredictionData(
 export async function getActivePrediction(
   channelId: string
 ): Promise<string | null> {
-  return kv.get<string>(`channel:${channelId}:active_prediction`)
+  return kvResilient.get<string>(`channel:${channelId}:active_prediction`)
 }
 
 /**
  * Clear the active prediction for a channel (after resolution/cancellation)
  */
 export async function clearActivePrediction(channelId: string): Promise<void> {
-  await kv.del(`channel:${channelId}:active_prediction`)
+  await kvResilient.del(`channel:${channelId}:active_prediction`)
 }
 
 /**
@@ -119,7 +120,7 @@ export async function storeStreamerSession(
     profileImageUrl?: string
   }
 ): Promise<void> {
-  await kv.set(`streamer:${twitchUserId}`, data)
+  await kvResilient.set(`streamer:${twitchUserId}`, data)
 }
 
 /**
@@ -134,7 +135,7 @@ export async function getStreamerSession(twitchUserId: string): Promise<{
   twitchDisplayName?: string
   profileImageUrl?: string
 } | null> {
-  return kv.get(`streamer:${twitchUserId}`)
+  return kvResilient.get(`streamer:${twitchUserId}`)
 }
 
 /**
@@ -150,7 +151,7 @@ export async function storeWalletStreamerProfile(
     profileImageUrl?: string
   }
 ): Promise<void> {
-  await kv.set(`wallet:${walletAddress.toLowerCase()}:streamer`, data)
+  await kvResilient.set(`wallet:${walletAddress.toLowerCase()}:streamer`, data)
 }
 
 export async function getWalletStreamerProfile(walletAddress: string): Promise<{
@@ -159,7 +160,7 @@ export async function getWalletStreamerProfile(walletAddress: string): Promise<{
   twitchDisplayName?: string
   profileImageUrl?: string
 } | null> {
-  return kv.get(`wallet:${walletAddress.toLowerCase()}:streamer`)
+  return kvResilient.get(`wallet:${walletAddress.toLowerCase()}:streamer`)
 }
 
 /**
@@ -170,18 +171,18 @@ export async function storeMarketOutcomes(
   marketId: bigint,
   outcomes: string[]
 ): Promise<void> {
-  await kv.set(
+  await kvResilient.set(
     `market:${marketId.toString()}:outcomes`,
     { outcomes },
     // Keep a bit longer than prediction TTL so list views can still render nicely
-    { ex: 86400 * 14 }
+    { ex: TTL.MARKET_OUTCOMES }
   )
 }
 
 export async function getMarketOutcomes(
   marketId: bigint
 ): Promise<{ outcomes: string[] } | null> {
-  return kv.get(`market:${marketId.toString()}:outcomes`)
+  return kvResilient.get(`market:${marketId.toString()}:outcomes`)
 }
 
 /**
@@ -190,7 +191,7 @@ export async function getMarketOutcomes(
 export async function deletePredictionMapping(twitchPredictionId: string): Promise<void> {
   const data = await getPredictionData(twitchPredictionId)
   if (data) {
-    await kv.del(`prediction:${twitchPredictionId}`)
+    await kvResilient.del(`prediction:${twitchPredictionId}`)
     await clearActivePrediction(data.channelId)
   }
 }

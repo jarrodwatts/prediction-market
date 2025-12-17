@@ -1,14 +1,9 @@
 "use client";
 
-/**
- * Market Timeline Component
- *
- * Displays a visual timeline of market lifecycle events.
- */
-
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { ChevronUp, ChevronDown, CheckCircle, Circle } from "lucide-react";
 import { formatDate } from "@/lib/formatters";
+import { useCountdown } from "@/lib/hooks/use-countdown";
 import type { MarketData } from "@/lib/types";
 
 interface MarketTimelineProps {
@@ -36,9 +31,9 @@ function getTimelineEvents(market: MarketData): TimelineEvent[] {
   const closed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
   const resolved = market.state === 2;
   
-  // A market is voided when resolvedOutcomeId is -1 (contract uses int256) or >= outcomeCount
-  const resolvedOutcomeId = Number(market.resolvedOutcomeId);
-  const isVoided = resolved && (resolvedOutcomeId < 0 || resolvedOutcomeId >= market.outcomeCount);
+  // A market is voided when resolvedOutcome is >= outcomeCount (invalid outcome index)
+  const resolvedOutcomeIdx = Number(market.resolvedOutcome);
+  const isVoided = resolved && (resolvedOutcomeIdx < 0 || resolvedOutcomeIdx >= market.outcomeCount);
 
   const events: TimelineEvent[] = [
     {
@@ -63,11 +58,11 @@ function getTimelineEvents(market: MarketData): TimelineEvent[] {
       });
     } else {
       // Get outcome name if available
-      const outcomeName = market.outcomes?.[resolvedOutcomeId];
+      const outcomeName = market.outcomes?.[resolvedOutcomeIdx];
       events.push({
         title: "Resolution",
         date: null,
-        description: outcomeName ? `Resolved: ${outcomeName}` : `Resolved (Outcome ${resolvedOutcomeId + 1})`,
+        description: outcomeName ? `Resolved: ${outcomeName}` : `Resolved (Outcome ${resolvedOutcomeIdx + 1})`,
         isCompleted: true,
       });
     }
@@ -119,21 +114,14 @@ export function MarketTimeline({
   embedded = false,
 }: MarketTimelineProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-  const [, forceUpdate] = useState(0);
   
-  // Auto-update when market closes
-  useEffect(() => {
-    const closesAtMs = market.closesAt ? Number(market.closesAt) * 1000 : 0;
-    const now = Date.now();
-    
-    if (closesAtMs > now) {
-      const timeUntilClose = closesAtMs - now + 1000;
-      const timer = setTimeout(() => forceUpdate(n => n + 1), timeUntilClose);
-      return () => clearTimeout(timer);
-    }
-  }, [market.closesAt]);
+  // Use countdown hook to trigger re-render when market closes
+  const closesAtSeconds = market.closesAt ? Number(market.closesAt) : null;
+  const remainingSeconds = useCountdown(closesAtSeconds);
   
-  const events = getTimelineEvents(market);
+  // Memoize events - re-compute when market closes (remainingSeconds becomes 0)
+  const hasClosed = remainingSeconds <= 0;
+  const events = useMemo(() => getTimelineEvents(market), [market, hasClosed]);
 
   return (
     <div className={embedded ? "" : "rounded-xl border border-border bg-card"}>

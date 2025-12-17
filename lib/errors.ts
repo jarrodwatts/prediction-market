@@ -100,9 +100,9 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     message: "You've already claimed your rewards.",
   },
   {
-    pattern: /no.*position|no.*shares|position.*empty/i,
+    pattern: /no.*position|no.*shares|position.*empty|no.*bets/i,
     title: "No Position",
-    message: "You don't have any shares to sell or claim.",
+    message: "You don't have any bets to claim.",
   },
 
   // ============ Network & Connection Errors ============
@@ -320,3 +320,6 @@ export function isUserRejection(error: unknown): boolean {
   const errorMessage = extractErrorMessage(error);
   return /user rejected|user denied|rejected by user|request rejected|user closed|popup closed/i.test(errorMessage);
 }
+
+
+

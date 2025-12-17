@@ -1,5 +1,18 @@
 import type { NextAuthConfig } from "next-auth"
+import type { JWT } from "@auth/core/jwt"
 import Twitch from "next-auth/providers/twitch"
+
+/**
+ * Twitch profile shape from OpenID Connect
+ */
+interface TwitchProfile {
+  sub: string
+  preferred_username?: string
+  login?: string
+  display_name?: string
+  name?: string
+  picture?: string
+}
 
 export const authConfig: NextAuthConfig = {
   providers: [
@@ -14,7 +27,7 @@ export const authConfig: NextAuthConfig = {
     }),
   ],
   callbacks: {
-    async jwt({ token, account, profile }) {
+    async jwt({ token, account, profile }): Promise<JWT> {
       // Persist the access_token and Twitch user info to the JWT
       if (account) {
         token.accessToken = account.access_token
@@ -23,8 +36,9 @@ export const authConfig: NextAuthConfig = {
         token.expiresAt = account.expires_at
       }
       if (profile) {
-        token.twitchLogin = (profile as any).preferred_username || (profile as any).login
-        token.twitchDisplayName = (profile as any).display_name || (profile as any).name
+        const twitchProfile = profile as TwitchProfile
+        token.twitchLogin = twitchProfile.preferred_username || twitchProfile.login
+        token.twitchDisplayName = twitchProfile.display_name || twitchProfile.name
       }
       return token
     },
@@ -32,10 +46,10 @@ export const authConfig: NextAuthConfig = {
       // Send properties to the client
       return {
         ...session,
-        accessToken: token.accessToken as string,
-        twitchId: token.twitchId as string,
-        twitchLogin: token.twitchLogin as string,
-        twitchDisplayName: token.twitchDisplayName as string,
+        accessToken: token.accessToken ?? '',
+        twitchId: token.twitchId ?? '',
+        twitchLogin: token.twitchLogin ?? '',
+        twitchDisplayName: token.twitchDisplayName ?? '',
       }
     },
   },

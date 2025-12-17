@@ -1,16 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import { ConnectWalletPrompt } from "@/components/ui/connect-wallet-prompt";
+import { useMounted } from "@/lib/hooks/use-mounted";
 
 export default function PortfolioPage() {
   const { isConnected, address, status, isConnecting, isReconnecting } = useAccount();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useMounted();
 
   // Prevent flashing the big prompt while wagmi is hydrating/reconnecting.
   if (

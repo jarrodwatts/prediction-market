@@ -28,12 +28,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { erc20Abi, formatUnits } from "viem";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { truncateAddress } from "@/lib/formatters";
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "next-themes";
 import Link from "next/link";
+import { USDC, formatUSDC } from "@/lib/tokens";
+import { useMounted } from "@/lib/hooks/use-mounted";
 
 interface ConnectWalletButtonProps {
   customDropdownItems?: React.ReactNode[];
@@ -55,12 +57,8 @@ type AbstractProfile = {
 };
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
-const USDC_ADDRESS =
-  (process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}` | undefined) ??
-  (ZERO_ADDRESS as `0x${string}`);
-const USDC_DECIMALS = 6;
 const DEPOSIT_THRESHOLD_USD = 100n;
-const DEPOSIT_THRESHOLD_USDC = DEPOSIT_THRESHOLD_USD * 10n ** BigInt(USDC_DECIMALS);
+const DEPOSIT_THRESHOLD_USDC = DEPOSIT_THRESHOLD_USD * 10n ** BigInt(USDC.decimals);
 const DEPOSIT_URL = "https://portal.abs.xyz/onramp";
 
 function abstractProfileQuery(address: `0x${string}` | undefined) {
@@ -79,8 +77,8 @@ function abstractProfileQuery(address: `0x${string}` | undefined) {
       }
     },
     enabled: !!address,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    staleTime: 5 * 60 * 1_000,
+    gcTime: 10 * 60 * 1_000,
     retry: false,
   } as const;
 }
@@ -94,23 +92,23 @@ export function ConnectWalletButton({
   const { address, status, isConnecting, isReconnecting } = useAccount();
   const [hasCopied, setHasCopied] = useState(false);
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useMounted();
 
   const { data: profile } = useQuery(abstractProfileQuery(address));
 
   const { data: balanceData } = useReadContract({
-    address: USDC_ADDRESS,
+    address: USDC.address,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: {
-      enabled: !!address && USDC_ADDRESS !== (ZERO_ADDRESS as `0x${string}`),
+      enabled: !!address && USDC.address !== (ZERO_ADDRESS as `0x${string}`),
       refetchInterval: 10_000,
     },
   });
 
   const formattedBalance = balanceData
-    ? formatUnits(balanceData, USDC_DECIMALS)
+    ? formatUSDC(balanceData)
     : "0";
 
   const isLoading =
@@ -118,11 +116,6 @@ export function ConnectWalletButton({
     status === "reconnecting" ||
     isConnecting ||
     isReconnecting;
-
-  // Avoid hydration/reconnect flashes (e.g. briefly showing "Connect Wallet" then swapping to avatar)
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   if (!mounted || isLoading) {
     if (mode === "header") {
@@ -153,14 +146,14 @@ export function ConnectWalletButton({
       navigator.clipboard.writeText(address);
       toast.success("Address copied to clipboard");
       setHasCopied(true);
-      setTimeout(() => setHasCopied(false), 2000);
+      setTimeout(() => setHasCopied(false), 2_000);
     }
   };
 
   if (status === "connected" && address) {
     const displayName = profile?.name || "User";
     const balanceUsd = formatUsdSmart(Number(formattedBalance));
-    const hasUsdcConfigured = USDC_ADDRESS !== (ZERO_ADDRESS as `0x${string}`);
+    const hasUsdcConfigured = USDC.address !== (ZERO_ADDRESS as `0x${string}`);
     const isBalanceLoading = hasUsdcConfigured && balanceData === undefined;
 
     // Root-cause fix: do NOT treat "unknown balance" as "low balance".
@@ -359,7 +352,7 @@ export function ConnectWalletButton({
 function formatUsdSmart(value: number): string {
   const safe = Number.isFinite(value) ? value : 0;
   const abs = Math.abs(safe);
-  const fractionDigits = abs >= 1000 ? 0 : 2;
+  const fractionDigits = abs >= 1_000 ? 0 : 2;
 
   return new Intl.NumberFormat("en-US", {
     style: "currency",

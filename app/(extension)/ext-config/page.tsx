@@ -7,7 +7,8 @@
  * This runs within the Twitch Extension Config view (not on our main site).
  */
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
 import { useTwitchExtension } from '@/lib/use-twitch-extension'
 import { CheckCircle, Wallet, Twitch, ExternalLink, Loader2, AlertCircle, DollarSign, BarChart3, Users } from 'lucide-react'
@@ -32,81 +33,65 @@ interface StreamerStats {
 }
 
 export default function ExtConfigPage() {
-  const [status, setStatus] = useState<StreamerStatus | null>(null)
-  const [stats, setStats] = useState<StreamerStats | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const queryClient = useQueryClient()
 
   // Twitch extension context
-  const { isReady, channelId, token, setBroadcasterConfig, broadcasterConfig } = useTwitchExtension()
+  const { isReady, channelId, token, setBroadcasterConfig } = useTwitchExtension()
 
   // Wallet connection
   const { login } = useLoginWithAbstract()
   const { data: abstractClient, isLoading: isWalletLoading } = useAbstractClient()
   const walletAddress = abstractClient?.account?.address
 
-  // Check if streamer is already set up
-  useEffect(() => {
-    if (!isReady || !channelId) return
-
-    const checkStatus = async () => {
-      try {
-        setIsLoading(true)
-        const res = await fetch(`${API_BASE_URL}/api/streamer/status?channelId=${channelId}`, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-        })
-        
-        if (res.ok) {
-          const data = await res.json()
-          setStatus(data)
-        } else {
-          setStatus({
-            isRegistered: false,
-            hasWallet: false,
-            hasSubscriptions: false,
-          })
-        }
-      } catch (err) {
-        console.error('Error checking status:', err)
-        setError('Failed to check registration status')
-      } finally {
-        setIsLoading(false)
+  // Fetch streamer status using TanStack Query
+  const { 
+    data: status, 
+    isLoading, 
+    error: statusError 
+  } = useQuery({
+    queryKey: ['streamer-status', channelId],
+    queryFn: async (): Promise<StreamerStatus> => {
+      const res = await fetch(`${API_BASE_URL}/api/streamer/status?channelId=${channelId}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      })
+      
+      if (res.ok) {
+        return res.json()
       }
-    }
-
-    checkStatus()
-  }, [isReady, channelId, token])
-
-  // Load stats if registered
-  useEffect(() => {
-    if (!status?.isRegistered || !channelId) return
-
-    const loadStats = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/streamer/stats?channelId=${channelId}`)
-        if (res.ok) {
-          const data = await res.json()
-          setStats(data)
-        }
-      } catch (err) {
-        console.error('Error loading stats:', err)
+      
+      return {
+        isRegistered: false,
+        hasWallet: false,
+        hasSubscriptions: false,
       }
-    }
+    },
+    enabled: isReady && !!channelId,
+  })
 
-    loadStats()
-  }, [status, channelId])
+  // Fetch stats using TanStack Query (only when registered)
+  const { data: stats } = useQuery({
+    queryKey: ['streamer-stats', channelId],
+    queryFn: async (): Promise<StreamerStats | null> => {
+      const res = await fetch(`${API_BASE_URL}/api/streamer/stats?channelId=${channelId}`)
+      if (res.ok) {
+        return res.json()
+      }
+      return null
+    },
+    enabled: !!status?.isRegistered && !!channelId,
+  })
 
-  // Save wallet and set up EventSub subscriptions
-  const handleSetup = async () => {
-    if (!walletAddress || !channelId) return
+  // Derive error from query
+  const error = statusError ? 'Failed to check registration status' : null
 
-    try {
-      setIsSaving(true)
-      setError(null)
+  // Setup mutation using TanStack Query
+  const setupMutation = useMutation({
+    mutationFn: async () => {
+      if (!walletAddress || !channelId) {
+        throw new Error('Missing wallet address or channel ID')
+      }
 
-      // Save wallet address
       const settingsRes = await fetch(`${API_BASE_URL}/api/streamer/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,34 +105,33 @@ export default function ExtConfigPage() {
         throw new Error('Failed to save wallet address')
       }
 
-      // Note: EventSub subscriptions require OAuth flow which can't be done in extension
-      // The streamer needs to visit the main app to complete this step
-      
+      return { walletAddress }
+    },
+    onSuccess: ({ walletAddress: savedAddress }) => {
       // Save config to Twitch's broadcaster config
       setBroadcasterConfig(JSON.stringify({
-        walletAddress,
+        walletAddress: savedAddress,
         setupAt: Date.now(),
       }))
 
-      // Update status
-      setStatus(prev => ({
-        ...prev!,
-        isRegistered: true,
-        hasWallet: true,
-        walletAddress,
-      }))
+      // Invalidate status query to refetch
+      queryClient.invalidateQueries({ queryKey: ['streamer-status', channelId] })
 
       setSaveSuccess(true)
-      setTimeout(() => setSaveSuccess(false), 3000)
-    } catch (err: unknown) {
-      const parsed = parseError(err, 'streamerSetup')
-      setError(parsed.suggestion 
-        ? `${parsed.message} ${parsed.suggestion}`
-        : parsed.message)
-    } finally {
-      setIsSaving(false)
-    }
+      setTimeout(() => setSaveSuccess(false), 3_000)
+    },
+  })
+
+  // Handler for setup button
+  const handleSetup = () => {
+    setupMutation.mutate()
   }
+
+  // Derive mutation state
+  const isSaving = setupMutation.isPending
+  const setupError = setupMutation.error 
+    ? parseError(setupMutation.error, 'streamerSetup')
+    : null
 
   // Determine current setup step
   const currentStep = !status?.hasWallet ? 1 : !status?.hasSubscriptions ? 2 : 3
@@ -177,12 +161,16 @@ export default function ExtConfigPage() {
         </div>
 
         {/* Error Display */}
-        {error && (
+        {(error || setupError) && (
           <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
             <div>
               <p className="text-red-400 font-medium">Setup Error</p>
-              <p className="text-red-400/70 text-sm">{error}</p>
+              <p className="text-red-400/70 text-sm">
+                {error || (setupError?.suggestion 
+                  ? `${setupError.message} ${setupError.suggestion}`
+                  : setupError?.message)}
+              </p>
             </div>
           </div>
         )}

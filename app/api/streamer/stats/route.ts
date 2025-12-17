@@ -34,18 +34,18 @@ export async function GET(request: NextRequest) {
 
     // Try to get actual market count from contract
     try {
-      const marketIndex = await publicClient.readContract({
+      const marketCount = await publicClient.readContract({
         address: PREDICTION_MARKET_ADDRESS,
         abi: PREDICTION_MARKET_ABI,
-        functionName: 'marketIndex',
+        functionName: 'marketCount',
       })
       
       // Note: This counts ALL markets, not just this streamer's
       // In production, we'd filter by creator address
-      stats.totalMarkets = Number(marketIndex)
+      stats.totalMarkets = Number(marketCount)
     } catch (e) {
       // Contract might not be deployed yet
-      console.log('Could not fetch market index:', e)
+      console.log('Could not fetch market count:', e)
     }
 
     return NextResponse.json(stats)

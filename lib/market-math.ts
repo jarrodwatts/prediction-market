@@ -1,78 +1,83 @@
-export const ONE = 10n ** 18n;
+/**
+ * Market Math - parimutuel pricing calculations
+ */
 
-export function ceildiv(x: bigint, y: bigint): bigint {
-  if (x > 0n) return (x - 1n) / y + 1n;
-  return 0n;
-}
-
+/**
+ * Calculate indicative payout for a bet
+ * 
+ * Formula: payout = (bet_amount / new_outcome_pool) * net_pot
+ */
 export function calcBuyAmount(
   amount: bigint,
   outcomeId: number,
-  outcomesShares: bigint[],
-  fee: bigint
+  outcomesShares: readonly bigint[],
+  totalFeeBps: bigint
 ): bigint {
-  const amountMinusFees = amount - (amount * fee) / ONE;
-  const buyTokenPoolBalance = outcomesShares[outcomeId];
-  let endingOutcomeBalance = buyTokenPoolBalance * ONE;
+  if (amount <= 0n) return 0n;
+  if (outcomeId < 0 || outcomeId >= outcomesShares.length) return 0n;
 
-  for (let i = 0; i < outcomesShares.length; ++i) {
-    if (i !== outcomeId) {
-      const outcomeShares = outcomesShares[i];
-      endingOutcomeBalance = ceildiv(
-        endingOutcomeBalance * outcomeShares,
-        outcomeShares + amountMinusFees
-      );
-    }
-  }
+  // Calculate current total pot
+  const currentTotalPot = outcomesShares.reduce((sum, pool) => sum + pool, 0n);
+  const currentOutcomePool = outcomesShares[outcomeId];
 
-  const result =
-    buyTokenPoolBalance + amountMinusFees - ceildiv(endingOutcomeBalance, ONE);
-  return result > 0n ? result : 0n;
+  // After betting:
+  const newTotalPot = currentTotalPot + amount;
+  const newOutcomePool = currentOutcomePool + amount;
+
+  if (newOutcomePool === 0n) return 0n;
+
+  // Calculate net pot after fees (fees in basis points, 10000 = 100%)
+  const feeAmount = (newTotalPot * totalFeeBps) / 10000n;
+  const netPot = newTotalPot - feeAmount;
+
+  // User's indicative payout = (bet_amount / new_outcome_pool) * net_pot
+  const payout = (amount * netPot) / newOutcomePool;
+
+  return payout;
 }
 
-export function calcSellAmount(
-  amount: bigint,
-  outcomeId: number,
-  outcomesShares: bigint[],
-  fee: bigint
-): bigint {
-  const amountPlusFees = (amount * ONE) / (ONE - fee);
-  const sellTokenPoolBalance = outcomesShares[outcomeId];
-  let endingOutcomeBalance = sellTokenPoolBalance * ONE;
-
-  for (let i = 0; i < outcomesShares.length; ++i) {
-    if (i !== outcomeId) {
-      const outcomeShares = outcomesShares[i];
-      endingOutcomeBalance = ceildiv(
-        endingOutcomeBalance * outcomeShares,
-        outcomeShares - amountPlusFees
-      );
-    }
-  }
-
-  const result =
-    amountPlusFees + ceildiv(endingOutcomeBalance, ONE) - sellTokenPoolBalance;
-  return result > 0n ? result : 0n;
-}
-
+/**
+ * Calculate indicative price (probability) for an outcome
+ *
+ * Price = outcomePool / totalPot
+ *
+ * If no bets yet, returns equal probability for all outcomes.
+ *
+ * @param outcomeId - The outcome index
+ * @param pools - Array of pool sizes per outcome
+ * @returns Price as a number between 0 and 1
+ */
 export function getPrice(
   outcomeId: number,
-  outcomesShares: bigint[],
-  liquidity: bigint
+  pools: readonly bigint[]
 ): number {
-  // If liquidty is 0, avoid div by zero
-  if (liquidity === 0n) return 0;
+  const totalPot = pools.reduce((sum, pool) => sum + pool, 0n);
 
-  let div = ONE;
-  for (let i = 0; i < outcomesShares.length; ++i) {
-    if (i === outcomeId) continue;
-    if (outcomesShares[i] === 0n) return 0; // Handle edge case
-    div = div + (outcomesShares[outcomeId] * ONE) / outcomesShares[i];
+  // If no bets yet, return equal probability
+  if (totalPot === 0n) {
+    return 1 / pools.length;
   }
 
-  // price = ONE * ONE / div
-  // We return a number for display purposes, normalized to 0-1
-  const price = (ONE * ONE) / div;
-  return Number(price) / 1e18;
+  const pool = pools[outcomeId];
+  if (pool === 0n) return 0;
+
+  return Number(pool) / Number(totalPot);
+}
+
+/**
+ * Calculate all prices (probabilities) for a market
+ *
+ * @param pools - Array of pool sizes per outcome
+ * @returns Array of prices (0-1) for each outcome
+ */
+export function getPrices(pools: readonly bigint[]): number[] {
+  const totalPot = pools.reduce((sum, pool) => sum + pool, 0n);
+
+  // If no bets yet, return equal probabilities
+  if (totalPot === 0n) {
+    return pools.map(() => 1 / pools.length);
+  }
+
+  return pools.map((pool) => Number(pool) / Number(totalPot));
 }
 

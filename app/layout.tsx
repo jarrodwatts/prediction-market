@@ -6,6 +6,7 @@ import { Header } from "@/components/header";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "./providers";
 import { headers } from "next/headers";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -52,6 +53,7 @@ export default async function RootLayout({
               {children}
             </div>
           </Providers>
+          <SpeedInsights />
         </body>
       </html>
     );
@@ -75,7 +77,7 @@ export default async function RootLayout({
               <Header />
               <main className="flex-1">{children}</main>
             </div>
-            <Toaster 
+            <Toaster
               position="bottom-right"
               expand={false}
               richColors
@@ -83,6 +85,7 @@ export default async function RootLayout({
               duration={5000}
             />
           </Providers>
+          <SpeedInsights />
         </ThemeProvider>
       </body>
     </html>

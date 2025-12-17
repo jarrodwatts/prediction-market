@@ -1,1598 +1,636 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-// openzeppelin imports
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-library CeilDiv {
-  // calculates ceil(x/y)
-  function ceildiv(uint256 x, uint256 y) internal pure returns (uint256) {
-    if (x > 0) return ((x - 1) / y) + 1;
-    return 0;
-  }
-}
+/// @title Parimutuel Prediction Market
+/// @notice A parimutuel betting market where all bets go into a shared pot
+/// @dev Bets are final (no selling), fees taken at resolution, winners split the pot
+contract PredictionMarket is ReentrancyGuard, Pausable, Ownable {
+    using SafeERC20 for IERC20;
 
-interface IWETH {
-  function deposit() external payable;
+    // ============ Events ============
 
-  function transfer(address to, uint256 value) external returns (bool);
-
-  function withdraw(uint256) external;
-
-  function approve(address guy, uint256 wad) external returns (bool);
-}
-
-/// @title Prediction Market - AMM-based prediction market protocol
-/// @notice An open source example prediction market implementation
-/// @dev Uses constant product AMM for outcome share pricing
-contract PredictionMarket is ReentrancyGuard, Ownable {
-  using SafeERC20 for IERC20;
-  using CeilDiv for uint256;
-
-  // ------ Events ------
-
-  event MarketCreated(
-    address indexed user,
-    uint256 indexed marketId,
-    uint256 outcomes,
-    string question,
-    string image,
-    IERC20 token
-  );
-
-  event MarketActionTx(
-    address indexed user,
-    MarketAction indexed action,
-    uint256 indexed marketId,
-    uint256 outcomeId,
-    uint256 shares,
-    uint256 value,
-    uint256 timestamp
-  );
-
-  event Referral(
-    address indexed user,
-    uint256 indexed marketId,
-    string code,
-    MarketAction action,
-    uint256 outcomeId,
-    uint256 value,
-    uint256 timestamp
-  );
-
-  event MarketOutcomeShares(uint256 indexed marketId, uint256 timestamp, uint256[] outcomeShares, uint256 liquidity);
-
-  event MarketOutcomePrice(uint256 indexed marketId, uint256 indexed outcomeId, uint256 value, uint256 timestamp);
-
-  event MarketLiquidity(
-    uint256 indexed marketId,
-    uint256 value, // total liquidity
-    uint256 price, // value of one liquidity share; max: 1 (even odds situation)
-    uint256 timestamp
-  );
-
-  event MarketResolved(
-    address indexed user,
-    uint256 indexed marketId,
-    uint256 outcomeId,
-    uint256 timestamp,
-    bool admin
-  );
-
-  event MarketPaused(address indexed user, uint256 indexed marketId, bool paused, uint256 timestamp);
-
-  event MarketCloseDateEdited(
-    address indexed user,
-    uint256 indexed marketId,
-    uint256 closesAtTimestamp,
-    uint256 timestamp
-  );
-
-  // ------ Events End ------
-
-  uint256 private constant MAX_UINT_256 = type(uint256).max;
-
-  uint256 private constant ONE = 10**18;
-
-  uint256 public constant MAX_OUTCOMES = 2**5;
-
-  uint256 public constant MAX_FEE = 5 * 10**16; // 5%
-
-  enum MarketState {
-    open,
-    closed,
-    resolved
-  }
-  enum MarketAction {
-    buy,
-    sell,
-    addLiquidity,
-    removeLiquidity,
-    claimWinnings,
-    claimLiquidity,
-    claimFees,
-    claimVoided
-  }
-
-  struct Market {
-    // market details
-    uint256 closesAtTimestamp;
-    uint256 balance; // total stake
-    uint256 liquidity; // stake held
-    uint256 sharesAvailable; // shares held (all outcomes)
-    mapping(address => uint256) liquidityShares;
-    mapping(address => bool) liquidityClaims; // wether user has claimed liquidity earnings
-    MarketState state; // resolution variables
-    MarketResolution resolution; // fees
-    MarketFees fees;
-    // market outcomes
-    uint256 outcomeCount;
-    mapping(uint256 => MarketOutcome) outcomes;
-    IERC20 token; // ERC20 token market will use for trading
-    address creator; // market creator
-    bool paused; // market paused, no trading allowed
-  }
-
-  struct Fees {
-    uint256 fee; // fee % taken from every transaction
-    uint256 treasuryFee; // fee % taken from every transaction to a treasury address
-    uint256 distributorFee; // fee % taken from every transaction to a distributor address
-  }
-
-  struct MarketFees {
-    uint256 poolWeight; // internal var used to ensure pro-rate fee distribution
-    mapping(address => uint256) claimed;
-    address treasury; // address to send treasury fees to
-    address distributor; // fee % taken from every transaction to a treasury address
-    Fees buyFees; // fees for buy transactions
-    Fees sellFees; // fees for sell transactions
-  }
-
-  struct MarketResolution {
-    bool resolved;
-    uint256 outcomeId;
-  }
-
-  struct MarketOutcome {
-    uint256 marketId;
-    uint256 id;
-    Shares shares;
-  }
-
-  struct Shares {
-    uint256 total; // number of shares
-    uint256 available; // available shares
-    mapping(address => uint256) holders;
-    mapping(address => bool) claims; // wether user has claimed winnings
-    mapping(address => bool) voidedClaims; // wether user has claimed voided market shares
-  }
-
-  struct CreateMarketDescription {
-    uint256 value;
-    uint32 closesAt;
-    uint256 outcomes;
-    IERC20 token;
-    uint256[] distribution;
-    string question;
-    string image;
-    Fees buyFees;
-    Fees sellFees;
-    address treasury;
-    address distributor;
-  }
-
-  struct MarketUpdateDescription {
-    uint256 closesAtTimestamp;
-    uint256 balance;
-    uint256 liquidity;
-    uint256 sharesAvailable;
-    MarketState state;
-    uint256 resolvedOutcomeId;
-    uint256 feesPoolWeight;
-    address feesTreasury;
-    address feesDistributor;
-    Fees buyFees;
-    Fees sellFees;
-    uint256 outcomeCount;
-    IERC20 token;
-    address creator;
-    bool paused;
-  }
-
-  struct MarketOutcomeUpdateDescription {
-    uint256 id;
-    uint256 marketId;
-    uint256 sharesTotal;
-    uint256 sharesAvailable;
-  }
-
-  struct MarketFeesHolderUpdateDescription {
-    address holder;
-    uint256 amount;
-  }
-
-  struct MarketOutcomeHolderUpdateDescription {
-    address holder;
-    uint256 amount;
-    bool claim;
-    bool voidedClaim;
-  }
-
-  struct MarketLiquidityHolderUpdateDescription {
-    address holder;
-    uint256 amount;
-    bool claim;
-  }
-
-  struct MarketActionTxEvent {
-    address user;
-    MarketAction action;
-    uint256 marketId;
-    uint256 outcomeId;
-    uint256 shares;
-    uint256 value;
-    uint256 timestamp;
-  }
-
-  uint256[] marketIds;
-  mapping(uint256 => Market) markets;
-  uint256 public marketIndex;
-
-  // weth configs
-  IWETH public WETH;
-
-  // ------ Modifiers ------
-
-  modifier isMarket(uint256 marketId) {
-    require(marketId < marketIndex, "Market not found");
-    _;
-  }
-
-  modifier timeTransitions(uint256 marketId) {
-    if (block.timestamp > markets[marketId].closesAtTimestamp && markets[marketId].state == MarketState.open) {
-      _nextState(marketId);
-    }
-    _;
-  }
-
-  modifier atState(uint256 marketId, MarketState state) {
-    require(markets[marketId].state == state, "Market in incorrect state");
-    _;
-  }
-
-  modifier notAtState(uint256 marketId, MarketState state) {
-    require(markets[marketId].state != state, "Market in incorrect state");
-    _;
-  }
-
-  modifier notPaused(uint256 marketId) {
-    require(!markets[marketId].paused, "Market is paused");
-    _;
-  }
-
-  modifier paused(uint256 marketId) {
-    require(markets[marketId].paused, "Market is not paused");
-    _;
-  }
-
-  modifier transitionNext(uint256 marketId) {
-    _;
-    _nextState(marketId);
-  }
-
-  modifier transitionLast(uint256 marketId) {
-    _;
-    _lastState(marketId);
-  }
-
-  modifier isWETHMarket(uint256 marketId) {
-    require(address(WETH) != address(0), "WETH address is address 0");
-    require(address(markets[marketId].token) == address(WETH), "Market token is not WETH");
-    _;
-  }
-
-  // ------ Modifiers End ------
-
-  constructor(IWETH _WETH) {
-    WETH = _WETH;
-  }
-
-  receive() external payable {
-    assert(msg.sender == address(WETH)); // only accept ETH via fallback from the WETH contract
-  }
-
-  // ------ Core Functions ------
-
-  /// @dev for internal use only, validates the market fees and throws if they are not valid
-  function _validateFees(Fees memory fees) private pure {
-    require(fees.fee <= MAX_FEE, "fee must be <= 5%");
-    require(fees.treasuryFee <= MAX_FEE, "treasury fee must be <= 5%");
-    require(fees.distributorFee <= MAX_FEE, "distributor fee must be <= 5%");
-  }
-
-  /// @dev Creates a market and initializes the outcome shares pool
-  function _createMarket(CreateMarketDescription memory desc) private returns (uint256) {
-    uint256 marketId = marketIndex;
-    marketIds.push(marketId);
-
-    Market storage market = markets[marketId];
-
-    require(desc.value > 0, "stake needs to be > 0");
-    require(desc.closesAt > block.timestamp, "resolution before current date");
-    require(desc.outcomes > 0 && desc.outcomes <= MAX_OUTCOMES, "outcome count not between 1-32");
-
-    market.token = desc.token;
-    market.closesAtTimestamp = desc.closesAt;
-    market.state = MarketState.open;
-
-    // setting up fees
-    _validateFees(desc.buyFees);
-    market.fees.buyFees = desc.buyFees;
-    _validateFees(desc.sellFees);
-    market.fees.sellFees = desc.sellFees;
-
-    market.fees.treasury = desc.treasury;
-    market.fees.distributor = desc.distributor;
-    // setting intial value to an integer that does not map to any outcomeId
-    market.resolution.outcomeId = MAX_UINT_256;
-    market.outcomeCount = desc.outcomes;
-
-    market.creator = msg.sender;
-
-    _addLiquidity(marketId, desc.value, desc.distribution);
-
-    // emiting initial price events
-    _emitMarketActionEvents(marketId);
-    emit MarketCreated(msg.sender, marketId, desc.outcomes, desc.question, desc.image, desc.token);
-
-    // incrementing market array index
-    marketIndex = marketIndex + 1;
-
-    return marketId;
-  }
-
-  function createMarket(CreateMarketDescription calldata desc) external nonReentrant returns (uint256) {
-    uint256 marketId = _createMarket(
-      CreateMarketDescription({
-        value: desc.value,
-        closesAt: desc.closesAt,
-        outcomes: desc.outcomes,
-        token: desc.token,
-        distribution: desc.distribution,
-        question: desc.question,
-        image: desc.image,
-        buyFees: desc.buyFees,
-        sellFees: desc.sellFees,
-        treasury: desc.treasury,
-        distributor: desc.distributor
-      })
+    event MarketCreated(
+        address indexed creator,
+        uint256 indexed marketId,
+        uint256 outcomeCount,
+        string question,
+        string image,
+        address token
     );
-    // transferring funds
-    desc.token.safeTransferFrom(msg.sender, address(this), desc.value);
 
-    return marketId;
-  }
-
-  function createMarketWithETH(CreateMarketDescription calldata desc) external payable nonReentrant returns (uint256) {
-    require(address(desc.token) == address(WETH), "Market token is not WETH");
-    require(msg.value == desc.value, "value does not match arguments");
-    uint256 marketId = _createMarket(
-      CreateMarketDescription({
-        value: desc.value,
-        closesAt: desc.closesAt,
-        outcomes: desc.outcomes,
-        token: desc.token,
-        distribution: desc.distribution,
-        question: desc.question,
-        image: desc.image,
-        buyFees: desc.buyFees,
-        sellFees: desc.sellFees,
-        treasury: desc.treasury,
-        distributor: desc.distributor
-      })
+    event BetPlaced(
+        address indexed user,
+        uint256 indexed marketId,
+        uint256 indexed outcomeId,
+        uint256 amount,
+        uint256 shares,
+        uint256 timestamp
     );
-    // transferring funds
-    IWETH(WETH).deposit{value: msg.value}();
 
-    return marketId;
-  }
-
-  /// @dev Calculates the number of shares bought with "amount" balance
-  function calcBuyAmount(
-    uint256 amount,
-    uint256 marketId,
-    uint256 outcomeId
-  ) public view returns (uint256) {
-    Market storage market = markets[marketId];
-    require(outcomeId < market.outcomeCount, "outcome is out of bounds");
-
-    uint256[] memory outcomesShares = getMarketOutcomesShares(marketId);
-    uint256 fee = getMarketFee(marketId);
-    uint256 amountMinusFees = amount - ((amount * fee) / ONE);
-    uint256 buyTokenPoolBalance = outcomesShares[outcomeId];
-    uint256 endingOutcomeBalance = buyTokenPoolBalance * ONE;
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      if (i != outcomeId) {
-        uint256 outcomeShares = outcomesShares[i];
-        endingOutcomeBalance = (endingOutcomeBalance * outcomeShares).ceildiv(outcomeShares + amountMinusFees);
-      }
-    }
-    require(endingOutcomeBalance > 0, "must have non-zero balances");
-
-    return buyTokenPoolBalance + amountMinusFees - (endingOutcomeBalance.ceildiv(ONE));
-  }
-
-  /// @dev Calculates the number of shares needed to be sold in order to receive "amount" in balance
-  function calcSellAmount(
-    uint256 amount,
-    uint256 marketId,
-    uint256 outcomeId
-  ) public view returns (uint256 outcomeTokenSellAmount) {
-    Market storage market = markets[marketId];
-    require(outcomeId < market.outcomeCount, "outcome is out of bounds");
-
-    uint256[] memory outcomesShares = getMarketOutcomesShares(marketId);
-    uint256 fee = getMarketSellFee(marketId);
-    uint256 amountPlusFees = (amount * ONE) / (ONE - fee);
-    uint256 sellTokenPoolBalance = outcomesShares[outcomeId];
-    uint256 endingOutcomeBalance = sellTokenPoolBalance * ONE;
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      if (i != outcomeId) {
-        uint256 outcomeShares = outcomesShares[i];
-        endingOutcomeBalance = (endingOutcomeBalance * outcomeShares).ceildiv(outcomeShares - amountPlusFees);
-      }
-    }
-    require(endingOutcomeBalance > 0, "must have non-zero balances");
-
-    return amountPlusFees + endingOutcomeBalance.ceildiv(ONE) - sellTokenPoolBalance;
-  }
-
-  /// @dev Buy shares of a market outcome - returns gross amount of transaction (amount + fee)
-  function _buy(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 minOutcomeSharesToBuy,
-    uint256 value
-  ) private timeTransitions(marketId) atState(marketId, MarketState.open) notPaused(marketId) returns (uint256) {
-    Market storage market = markets[marketId];
-
-    uint256 shares = calcBuyAmount(value, marketId, outcomeId);
-    require(shares >= minOutcomeSharesToBuy, "minimum buy amount not reached");
-    require(shares > 0, "shares amount is 0");
-
-    // subtracting fee from transaction value
-    uint256 feeAmount = (value * market.fees.buyFees.fee) / ONE;
-    market.fees.poolWeight = market.fees.poolWeight + feeAmount;
-    uint256 valueMinusFees = value - feeAmount;
-
-    uint256 treasuryFeeAmount = (value * market.fees.buyFees.treasuryFee) / ONE;
-    uint256 distributorFeeAmount = (value * market.fees.buyFees.distributorFee) / ONE;
-    valueMinusFees = valueMinusFees - treasuryFeeAmount - distributorFeeAmount;
-
-    MarketOutcome storage outcome = market.outcomes[outcomeId];
-
-    // Funding market shares with received funds
-    _addSharesToMarket(marketId, valueMinusFees);
-
-    require(outcome.shares.available >= shares, "shares pool balance is too low");
-
-    _transferOutcomeSharesfromPool(msg.sender, marketId, outcomeId, shares);
-
-    // value emmited in event includes fee (gross amount)
-    emit MarketActionTx(msg.sender, MarketAction.buy, marketId, outcomeId, shares, value, block.timestamp);
-    _emitMarketActionEvents(marketId);
-
-    // transfering treasury/distributor fees
-    if (treasuryFeeAmount > 0) {
-      market.token.safeTransfer(market.fees.treasury, treasuryFeeAmount);
-    }
-    if (distributorFeeAmount > 0) {
-      market.token.safeTransfer(market.fees.distributor, distributorFeeAmount);
-    }
-
-    return value;
-  }
-
-  /// @dev Buy shares of a market outcome
-  function buy(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 minOutcomeSharesToBuy,
-    uint256 value
-  ) external nonReentrant {
-    Market storage market = markets[marketId];
-    market.token.safeTransferFrom(msg.sender, address(this), value);
-    _buy(marketId, outcomeId, minOutcomeSharesToBuy, value);
-  }
-
-  function buyWithETH(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 minOutcomeSharesToBuy
-  ) external payable isWETHMarket(marketId) nonReentrant {
-    uint256 value = msg.value;
-    // wrapping and depositing funds
-    IWETH(WETH).deposit{value: value}();
-    _buy(marketId, outcomeId, minOutcomeSharesToBuy, value);
-  }
-
-  function referralBuy(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 minOutcomeSharesToBuy,
-    uint256 value,
-    string memory code
-  ) public nonReentrant {
-    Market storage market = markets[marketId];
-    market.token.safeTransferFrom(msg.sender, address(this), value);
-    _buy(marketId, outcomeId, minOutcomeSharesToBuy, value);
-
-    emit Referral(msg.sender, marketId, code, MarketAction.buy, outcomeId, value, block.timestamp);
-  }
-
-  function referralBuyWithETH(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 minOutcomeSharesToBuy,
-    string memory code
-  ) public payable isWETHMarket(marketId) nonReentrant {
-    uint256 value = msg.value;
-    // wrapping and depositing funds
-    IWETH(WETH).deposit{value: value}();
-    _buy(marketId, outcomeId, minOutcomeSharesToBuy, value);
-
-    emit Referral(msg.sender, marketId, code, MarketAction.buy, outcomeId, msg.value, block.timestamp);
-  }
-
-  /// @dev Sell shares of a market outcome - returns gross amount of transaction (amount + fee)
-  function _sell(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 value,
-    uint256 maxOutcomeSharesToSell
-  ) private timeTransitions(marketId) atState(marketId, MarketState.open) notPaused(marketId) returns (uint256) {
-    Market storage market = markets[marketId];
-    MarketOutcome storage outcome = market.outcomes[outcomeId];
-
-    uint256 shares = calcSellAmount(value, marketId, outcomeId);
-
-    require(shares <= maxOutcomeSharesToSell, "maximum sell amount exceeded");
-    require(shares > 0, "shares amount is 0");
-    require(outcome.shares.holders[msg.sender] >= shares, "insufficient shares balance");
-
-    _transferOutcomeSharesToPool(msg.sender, marketId, outcomeId, shares);
-
-    // adding fees to transaction value
-    uint256 fee = getMarketSellFee(marketId);
-    uint256 oneMinusFee = ONE - fee;
-    {
-      uint256 feeAmount = (value * market.fees.sellFees.fee) / oneMinusFee;
-      market.fees.poolWeight = market.fees.poolWeight + feeAmount;
-    }
-    uint256 valuePlusFees = value + (value * fee) / oneMinusFee;
-
-    require(market.balance >= valuePlusFees, "insufficient market balance");
-
-    // Rebalancing market shares
-    _removeSharesFromMarket(marketId, valuePlusFees);
-
-    // value emmited in event includes fee (gross amount)
-    emit MarketActionTx(msg.sender, MarketAction.sell, marketId, outcomeId, shares, valuePlusFees, block.timestamp);
-    _emitMarketActionEvents(marketId);
-
-    {
-      uint256 treasuryFeeAmount = (value * market.fees.sellFees.treasuryFee) / oneMinusFee;
-      uint256 distributorFeeAmount = (value * market.fees.sellFees.distributorFee) / oneMinusFee;
-      // transfering treasury/distributor fees
-      if (treasuryFeeAmount > 0) {
-        market.token.safeTransfer(market.fees.treasury, treasuryFeeAmount);
-      }
-      if (distributorFeeAmount > 0) {
-        market.token.safeTransfer(market.fees.distributor, distributorFeeAmount);
-      }
-    }
-
-    return valuePlusFees;
-  }
-
-  function sell(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 value,
-    uint256 maxOutcomeSharesToSell
-  ) external nonReentrant {
-    _sell(marketId, outcomeId, value, maxOutcomeSharesToSell);
-    // Transferring funds to user
-    Market storage market = markets[marketId];
-    market.token.safeTransfer(msg.sender, value);
-  }
-
-  function sellToETH(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 value,
-    uint256 maxOutcomeSharesToSell
-  ) external isWETHMarket(marketId) nonReentrant {
-    Market storage market = markets[marketId];
-    require(address(market.token) == address(WETH), "market token is not WETH");
-
-    _sell(marketId, outcomeId, value, maxOutcomeSharesToSell);
-
-    IWETH(WETH).withdraw(value);
-    (bool sent, ) = payable(msg.sender).call{value: value}("");
-    require(sent, "Failed to send Ether");
-  }
-
-  function referralSell(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 value,
-    uint256 maxOutcomeSharesToSell,
-    string memory code
-  ) external nonReentrant {
-    uint256 valuePlusFees = _sell(marketId, outcomeId, value, maxOutcomeSharesToSell);
-    // Transferring funds to user
-    Market storage market = markets[marketId];
-    market.token.safeTransfer(msg.sender, value);
-
-    emit Referral(msg.sender, marketId, code, MarketAction.sell, outcomeId, valuePlusFees, block.timestamp);
-  }
-
-  function referralSellToETH(
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 value,
-    uint256 maxOutcomeSharesToSell,
-    string memory code
-  ) external isWETHMarket(marketId) nonReentrant {
-    Market storage market = markets[marketId];
-    require(address(market.token) == address(WETH), "market token is not WETH");
-
-    uint256 valuePlusFees = _sell(marketId, outcomeId, value, maxOutcomeSharesToSell);
-
-    IWETH(WETH).withdraw(value);
-    (bool sent, ) = payable(msg.sender).call{value: value}("");
-    require(sent, "Failed to send Ether");
-
-    emit Referral(msg.sender, marketId, code, MarketAction.sell, outcomeId, valuePlusFees, block.timestamp);
-  }
-
-  /// @dev Adds liquidity to a market - external
-  function _addLiquidity(
-    uint256 marketId,
-    uint256 value,
-    uint256[] memory distribution
-  ) private timeTransitions(marketId) atState(marketId, MarketState.open) notPaused(marketId) {
-    Market storage market = markets[marketId];
-
-    require(value > 0, "stake has to be greater than 0.");
-
-    uint256 liquidityAmount;
-
-    uint256[] memory outcomesShares = getMarketOutcomesShares(marketId);
-    uint256[] memory sendBackAmounts = new uint256[](market.outcomeCount);
-    uint256 poolWeight = 0;
-
-    if (market.liquidity > 0) {
-      require(distribution.length == 0, "market already funded");
-
-      // part of the liquidity is exchanged for outcome shares if market is not balanced
-      for (uint256 i = 0; i < market.outcomeCount; ++i) {
-        uint256 outcomeShares = outcomesShares[i];
-        if (poolWeight < outcomeShares) poolWeight = outcomeShares;
-      }
-
-      for (uint256 i = 0; i < market.outcomeCount; ++i) {
-        uint256 remaining = (value * outcomesShares[i]) / poolWeight;
-        sendBackAmounts[i] = value - remaining;
-      }
-
-      liquidityAmount = (value * market.liquidity) / poolWeight;
-
-      // re-balancing fees pool
-      _rebalanceFeesPool(marketId, liquidityAmount, MarketAction.addLiquidity);
-    } else {
-      uint256 distributionLength = distribution.length;
-      // funding market with no liquidity
-      if (distributionLength > 0) {
-        require(distributionLength == market.outcomeCount, "distribution length not matching");
-
-        uint256 maxHint = 0;
-        for (uint256 i = 0; i < distributionLength; ++i) {
-          uint256 hint = distribution[i];
-          if (maxHint < hint) maxHint = hint;
-        }
-
-        for (uint256 i = 0; i < distributionLength; ++i) {
-          uint256 remaining = (value * distribution[i]) / maxHint;
-          require(remaining > 0, "must hint a valid distribution");
-          sendBackAmounts[i] = value - remaining;
-        }
-      }
-
-      // funding market with total liquidity amount
-      liquidityAmount = value;
-    }
-
-    // funding market
-    market.liquidity = market.liquidity + liquidityAmount;
-    market.liquidityShares[msg.sender] = market.liquidityShares[msg.sender] + liquidityAmount;
-
-    _addSharesToMarket(marketId, value);
-
-    {
-      // transform sendBackAmounts to array of amounts added
-      for (uint256 i = 0; i < market.outcomeCount; ++i) {
-        if (sendBackAmounts[i] > 0) {
-          _transferOutcomeSharesfromPool(msg.sender, marketId, i, sendBackAmounts[i]);
-        }
-      }
-
-      // emitting events, using outcome 0 for price reference
-      uint256 referencePrice = getMarketOutcomePrice(marketId, 0);
-
-      for (uint256 i = 0; i < market.outcomeCount; ++i) {
-        if (sendBackAmounts[i] > 0) {
-          // outcome price = outcome shares / reference outcome shares * reference outcome price
-          uint256 outcomePrice = (referencePrice * market.outcomes[0].shares.available) /
-            market.outcomes[i].shares.available;
-
-          emit MarketActionTx(
-            msg.sender,
-            MarketAction.buy,
-            marketId,
-            i,
-            sendBackAmounts[i],
-            (sendBackAmounts[i] * outcomePrice) / ONE, // price * shares
-            block.timestamp
-          );
-        }
-      }
-    }
-
-    uint256 liquidityPrice = getMarketLiquidityPrice(marketId);
-    uint256 liquidityValue = (liquidityPrice * liquidityAmount) / ONE;
-
-    emit MarketActionTx(
-      msg.sender,
-      MarketAction.addLiquidity,
-      marketId,
-      0,
-      liquidityAmount,
-      liquidityValue,
-      block.timestamp
+    event MarketResolved(
+        address indexed resolver,
+        uint256 indexed marketId,
+        uint256 winningOutcome,
+        uint256 totalPot,
+        uint256 protocolFee,
+        uint256 creatorFee,
+        uint256 timestamp
     );
-    emit MarketLiquidity(marketId, market.liquidity, liquidityPrice, block.timestamp);
-  }
 
-  function addLiquidity(uint256 marketId, uint256 value) external nonReentrant {
-    uint256[] memory distribution = new uint256[](0);
-    _addLiquidity(marketId, value, distribution);
+    event MarketVoided(
+        address indexed resolver,
+        uint256 indexed marketId,
+        uint256 timestamp
+    );
 
-    Market storage market = markets[marketId];
-    market.token.safeTransferFrom(msg.sender, address(this), value);
-  }
+    event WinningsClaimed(
+        address indexed user,
+        uint256 indexed marketId,
+        uint256 shares,
+        uint256 payout,
+        uint256 timestamp
+    );
 
-  function addLiquidityWithETH(uint256 marketId) external payable nonReentrant isWETHMarket(marketId) {
-    uint256 value = msg.value;
-    uint256[] memory distribution = new uint256[](0);
-    _addLiquidity(marketId, value, distribution);
-    // wrapping and depositing funds
-    IWETH(WETH).deposit{value: value}();
-  }
+    event RefundClaimed(
+        address indexed user,
+        uint256 indexed marketId,
+        uint256 outcomeId,
+        uint256 amount,
+        uint256 timestamp
+    );
 
-  /// @dev Removes liquidity to a market - external
-  function _removeLiquidity(uint256 marketId, uint256 shares)
-    private
-    timeTransitions(marketId)
-    atState(marketId, MarketState.open)
-    notPaused(marketId)
-    returns (uint256)
-  {
-    Market storage market = markets[marketId];
+    event MarketLocked(
+        address indexed locker,
+        uint256 indexed marketId,
+        uint256 timestamp
+    );
 
-    // removing 100% of the liquidity is not allowed
-    require(shares < market.liquidity, "cannot remove all liquidity");
-    require(market.liquidityShares[msg.sender] >= shares, "insufficient shares balance");
+    event TokenWhitelistUpdated(address indexed token, bool allowed);
+    event EmergencyWithdrawToggled(bool enabled);
+    event ProtocolTreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
 
-    // re-balancing fees pool
-    _rebalanceFeesPool(marketId, shares, MarketAction.removeLiquidity);
+    // ============ Enums ============
 
-    uint256[] memory outcomesShares = getMarketOutcomesShares(marketId);
-    uint256[] memory sendAmounts = new uint256[](market.outcomeCount);
-    uint256 poolWeight = MAX_UINT_256;
-
-    // part of the liquidity is exchanged for outcome shares if market is not balanced
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      uint256 outcomeShares = outcomesShares[i];
-      if (poolWeight > outcomeShares) poolWeight = outcomeShares;
+    enum MarketState {
+        Open,       // Accepting bets
+        Locked,     // Betting closed, awaiting resolution
+        Resolved,   // Winner determined, payouts available
+        Voided      // Market cancelled, refunds available
     }
 
-    uint256 liquidityAmount = (shares * poolWeight) / market.liquidity;
+    // ============ Structs ============
 
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      sendAmounts[i] = (outcomesShares[i] * shares) / market.liquidity;
-      sendAmounts[i] = sendAmounts[i] - liquidityAmount;
+    struct Market {
+        string question;
+        string image;
+        uint256 outcomeCount;
+        uint256 closesAt;           // Unix timestamp when betting closes
+        uint256 totalPot;           // Total USDC in the pot
+        uint256 resolvedOutcome;    // Winning outcome ID (only valid if resolved)
+        uint256 payoutPerShare;     // Calculated at resolution (18 decimals)
+        MarketState state;
+        address creator;            // Gets creator fee
+        address token;              // USDC address
+        uint16 protocolFeeBps;      // Protocol fee in basis points (e.g., 150 = 1.5%)
+        uint16 creatorFeeBps;       // Creator fee in basis points
     }
 
-    // removing liquidity from market
-    _removeSharesFromMarket(marketId, liquidityAmount);
-    market.liquidity = market.liquidity - shares;
-    // removing liquidity tokens from market creator
-    market.liquidityShares[msg.sender] = market.liquidityShares[msg.sender] - shares;
-
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      if (sendAmounts[i] > 0) {
-        _transferOutcomeSharesfromPool(msg.sender, marketId, i, sendAmounts[i]);
-      }
+    struct OutcomePool {
+        uint256 totalShares;        // Total shares bet on this outcome
+        mapping(address => uint256) shares;  // User shares per outcome
+        mapping(address => bool) claimed;    // Whether user has claimed
     }
 
-    // emitting events, using outcome 0 for price reference
-    uint256 referencePrice = getMarketOutcomePrice(marketId, 0);
+    // ============ Constants ============
 
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      if (sendAmounts[i] > 0) {
-        // outcome price = outcome shares / reference outcome shares * reference outcome price
-        uint256 outcomePrice = (referencePrice * market.outcomes[0].shares.available) /
-          market.outcomes[i].shares.available;
+    uint256 public constant MAX_OUTCOMES = 32;
+    uint256 public constant MAX_FEE_BPS = 1000;     // 10% max total fee
+    uint256 public constant MIN_BET = 1e6;          // $1 USDC minimum (6 decimals)
+    uint256 public constant MAX_BET_PER_MARKET = 100_000e6;  // $100k max per market per user
+    uint256 public constant MAX_MARKET_POT = 1_000_000e6;    // $1M max total pot per market
+    uint256 private constant ONE = 1e18;
 
-        emit MarketActionTx(
-          msg.sender,
-          MarketAction.buy,
-          marketId,
-          i,
-          sendAmounts[i],
-          (sendAmounts[i] * outcomePrice) / ONE, // price * shares
-          block.timestamp
+    // ============ State ============
+
+    uint256 public marketCount;
+    address public protocolTreasury;
+    bool public emergencyWithdrawEnabled;  // Must be explicitly enabled
+
+    mapping(uint256 => Market) public markets;
+    mapping(uint256 => mapping(uint256 => OutcomePool)) private outcomePools;
+    mapping(address => bool) public allowedTokens;  // Token whitelist
+
+    // ============ Constructor ============
+
+    constructor(address _protocolTreasury) {
+        require(_protocolTreasury != address(0), "Invalid treasury");
+        protocolTreasury = _protocolTreasury;
+    }
+
+    // ============ Modifiers ============
+
+    modifier marketExists(uint256 marketId) {
+        require(marketId < marketCount, "Market does not exist");
+        _;
+    }
+
+    modifier onlyOpen(uint256 marketId) {
+        Market storage market = markets[marketId];
+        require(market.state == MarketState.Open, "Market not open");
+        require(block.timestamp < market.closesAt, "Market closed");
+        _;
+    }
+
+    modifier onlyResolvable(uint256 marketId) {
+        Market storage market = markets[marketId];
+        require(
+            market.state == MarketState.Open || market.state == MarketState.Locked,
+            "Market not resolvable"
         );
-      }
+        _;
     }
 
-    emit MarketActionTx(
-      msg.sender,
-      MarketAction.removeLiquidity,
-      marketId,
-      0,
-      shares,
-      liquidityAmount,
-      block.timestamp
-    );
-    emit MarketLiquidity(marketId, market.liquidity, getMarketLiquidityPrice(marketId), block.timestamp);
-
-    return liquidityAmount;
-  }
-
-  function removeLiquidity(uint256 marketId, uint256 shares) external nonReentrant {
-    uint256 value = _removeLiquidity(marketId, shares);
-    // transferring user funds from liquidity removed
-    Market storage market = markets[marketId];
-    market.token.safeTransfer(msg.sender, value);
-  }
-
-  function removeLiquidityToETH(uint256 marketId, uint256 shares) external nonReentrant isWETHMarket(marketId) {
-    uint256 value = _removeLiquidity(marketId, shares);
-    // unwrapping and transferring user funds from liquidity removed
-    IWETH(WETH).withdraw(value);
-    (bool sent, ) = payable(msg.sender).call{value: value}("");
-    require(sent, "Failed to send Ether");
-  }
-
-  /// @dev Resolves the market to a specific outcome (admin only)
-  function adminResolveMarketOutcome(uint256 marketId, uint256 outcomeId)
-    external
-    onlyOwner
-    notAtState(marketId, MarketState.resolved)
-    transitionLast(marketId)
-    returns (uint256)
-  {
-    Market storage market = markets[marketId];
-
-    market.resolution.outcomeId = outcomeId;
-
-    emit MarketResolved(msg.sender, marketId, outcomeId, block.timestamp, true);
-    _emitMarketActionEvents(marketId);
-
-    return market.resolution.outcomeId;
-  }
-
-  /// @dev pauses a market, no trading allowed
-  function adminPauseMarket(uint256 marketId) external onlyOwner isMarket(marketId) notPaused(marketId) nonReentrant {
-    Market storage market = markets[marketId];
-
-    market.paused = true;
-    emit MarketPaused(msg.sender, marketId, market.paused, block.timestamp);
-  }
-
-  /// @dev unpauses a market, trading allowed
-  function adminUnpauseMarket(uint256 marketId) external onlyOwner isMarket(marketId) paused(marketId) nonReentrant {
-    Market storage market = markets[marketId];
-
-    market.paused = false;
-    emit MarketPaused(msg.sender, marketId, market.paused, block.timestamp);
-  }
-
-  /// @dev overrides market close date
-  function adminSetMarketCloseDate(uint256 marketId, uint256 closesAt)
-    external
-    onlyOwner
-    isMarket(marketId)
-    notAtState(marketId, MarketState.resolved)
-  {
-    require(closesAt > block.timestamp, "resolution before current date");
-    Market storage market = markets[marketId];
-    market.closesAtTimestamp = closesAt;
-    emit MarketCloseDateEdited(msg.sender, marketId, closesAt, block.timestamp);
-  }
-
-  /// @dev Allows holders of resolved outcome shares to claim earnings.
-  function _claimWinnings(uint256 marketId) private atState(marketId, MarketState.resolved) returns (uint256) {
-    Market storage market = markets[marketId];
-    MarketOutcome storage resolvedOutcome = market.outcomes[market.resolution.outcomeId];
-
-    require(!isMarketVoided(marketId), "market is voided");
-    require(resolvedOutcome.shares.holders[msg.sender] > 0, "user doesn't hold outcome shares");
-    require(!resolvedOutcome.shares.claims[msg.sender], "user already claimed winnings");
-
-    // 1 share => price = 1
-    uint256 value = resolvedOutcome.shares.holders[msg.sender];
-
-    // assuring market has enough funds
-    require(market.balance >= value, "insufficient market balance");
-
-    market.balance = market.balance - value;
-    resolvedOutcome.shares.claims[msg.sender] = true;
-
-    emit MarketActionTx(
-      msg.sender,
-      MarketAction.claimWinnings,
-      marketId,
-      market.resolution.outcomeId,
-      resolvedOutcome.shares.holders[msg.sender],
-      value,
-      block.timestamp
-    );
-
-    return value;
-  }
-
-  function claimWinnings(uint256 marketId) external nonReentrant {
-    uint256 value = _claimWinnings(marketId);
-    // transferring user funds from winnings claimed
-    Market storage market = markets[marketId];
-    market.token.safeTransfer(msg.sender, value);
-  }
-
-  function claimWinningsToETH(uint256 marketId) external nonReentrant isWETHMarket(marketId) {
-    uint256 value = _claimWinnings(marketId);
-    // unwrapping and transferring user funds from winnings claimed
-    IWETH(WETH).withdraw(value);
-    (bool sent, ) = payable(msg.sender).call{value: value}("");
-    require(sent, "Failed to send Ether");
-  }
-
-  /// @dev Allows holders of voided outcome shares to claim balance back.
-  function _claimVoidedOutcomeShares(uint256 marketId, uint256 outcomeId)
-    private
-    atState(marketId, MarketState.resolved)
-    returns (uint256)
-  {
-    Market storage market = markets[marketId];
-    MarketOutcome storage outcome = market.outcomes[outcomeId];
-
-    require(isMarketVoided(marketId), "market is not voided");
-    require(outcome.shares.holders[msg.sender] > 0, "user doesn't hold outcome shares");
-    require(!outcome.shares.voidedClaims[msg.sender], "user already claimed shares");
-
-    // voided market - shares are valued at last market price
-    uint256 price = getMarketOutcomePrice(marketId, outcomeId);
-    uint256 value = (price * outcome.shares.holders[msg.sender]) / ONE;
-
-    // assuring market has enough funds
-    require(market.balance >= value, "insufficient market balance");
-
-    market.balance = market.balance - value;
-    outcome.shares.voidedClaims[msg.sender] = true;
-
-    emit MarketActionTx(
-      msg.sender,
-      MarketAction.claimVoided,
-      marketId,
-      outcomeId,
-      outcome.shares.holders[msg.sender],
-      value,
-      block.timestamp
-    );
-
-    return value;
-  }
-
-  function claimVoidedOutcomeShares(uint256 marketId, uint256 outcomeId) external nonReentrant {
-    uint256 value = _claimVoidedOutcomeShares(marketId, outcomeId);
-    // transferring user funds from voided outcome shares claimed
-    Market storage market = markets[marketId];
-    market.token.safeTransfer(msg.sender, value);
-  }
-
-  function claimVoidedOutcomeSharesToETH(uint256 marketId, uint256 outcomeId)
-    external
-    nonReentrant
-    isWETHMarket(marketId)
-  {
-    uint256 value = _claimVoidedOutcomeShares(marketId, outcomeId);
-    // unwrapping and transferring user funds from voided outcome shares claimed
-    IWETH(WETH).withdraw(value);
-    (bool sent, ) = payable(msg.sender).call{value: value}("");
-    require(sent, "Failed to send Ether");
-  }
-
-  /// @dev Allows liquidity providers to claim earnings from liquidity providing.
-  function _claimLiquidity(uint256 marketId) private atState(marketId, MarketState.resolved) returns (uint256) {
-    Market storage market = markets[marketId];
-
-    require(market.liquidityShares[msg.sender] > 0, "user doesn't hold shares");
-    require(!market.liquidityClaims[msg.sender], "user already claimed shares");
-
-    // value = total resolved outcome pool shares * pool share (%)
-    uint256 liquidityPrice = getMarketLiquidityPrice(marketId);
-    uint256 value = (liquidityPrice * market.liquidityShares[msg.sender]) / ONE;
-
-    // assuring market has enough funds
-    require(market.balance >= value, "insufficient market balance");
-
-    market.balance = market.balance - value;
-    market.liquidityClaims[msg.sender] = true;
-
-    emit MarketActionTx(
-      msg.sender,
-      MarketAction.claimLiquidity,
-      marketId,
-      0,
-      market.liquidityShares[msg.sender],
-      value,
-      block.timestamp
-    );
-
-    return value;
-  }
-
-  function claimLiquidity(uint256 marketId) external nonReentrant {
-    uint256 value = _claimLiquidity(marketId);
-    // transferring user funds from liquidity claimed
-    Market storage market = markets[marketId];
-    market.token.safeTransfer(msg.sender, value);
-
-    // claiming any pending fees
-    uint256 feesValue = _claimFees(marketId);
-    if (feesValue > 0) {
-      market.token.safeTransfer(msg.sender, feesValue);
-    }
-  }
-
-  function claimLiquidityToETH(uint256 marketId) external nonReentrant isWETHMarket(marketId) {
-    uint256 value = _claimLiquidity(marketId);
-    // unwrapping and transferring user funds from liquidity claimed
-    IWETH(WETH).withdraw(value);
-    (bool sent, ) = payable(msg.sender).call{value: value}("");
-    require(sent, "Failed to send Ether");
-  }
-
-  /// @dev Allows liquidity providers to claim their fees share from fees pool
-  function _claimFees(uint256 marketId) private returns (uint256) {
-    Market storage market = markets[marketId];
-
-    uint256 claimableFees = getUserClaimableFees(marketId, msg.sender);
-
-    if (claimableFees > 0) {
-      market.fees.claimed[msg.sender] = market.fees.claimed[msg.sender] + claimableFees;
+    modifier canResolve(uint256 marketId) {
+        Market storage market = markets[marketId];
+        require(
+            msg.sender == owner() || msg.sender == market.creator,
+            "Not authorized to resolve"
+        );
+        _;
     }
 
-    emit MarketActionTx(
-      msg.sender,
-      MarketAction.claimFees,
-      marketId,
-      0,
-      market.liquidityShares[msg.sender],
-      claimableFees,
-      block.timestamp
-    );
+    // ============ Admin Functions ============
 
-    return claimableFees;
-  }
-
-  function claimFees(uint256 marketId) public nonReentrant {
-    uint256 value = _claimFees(marketId);
-    // transferring user funds from fees claimed
-    Market storage market = markets[marketId];
-    market.token.safeTransfer(msg.sender, value);
-  }
-
-  function claimFeesToETH(uint256 marketId) public isWETHMarket(marketId) nonReentrant {
-    uint256 value = _claimFees(marketId);
-    // unwrapping and transferring user funds from fees claimed
-    IWETH(WETH).withdraw(value);
-    (bool sent, ) = payable(msg.sender).call{value: value}("");
-    require(sent, "Failed to send Ether");
-  }
-
-  /// @dev Rebalances the fees pool. Needed in every AddLiquidity / RemoveLiquidity call
-  function _rebalanceFeesPool(
-    uint256 marketId,
-    uint256 liquidityShares,
-    MarketAction action
-  ) private {
-    Market storage market = markets[marketId];
-
-    uint256 poolWeight = (liquidityShares * market.fees.poolWeight) / market.liquidity;
-
-    if (action == MarketAction.addLiquidity) {
-      market.fees.poolWeight = market.fees.poolWeight + poolWeight;
-      market.fees.claimed[msg.sender] = market.fees.claimed[msg.sender] + poolWeight;
-    } else {
-      market.fees.poolWeight = market.fees.poolWeight - poolWeight;
-      market.fees.claimed[msg.sender] = market.fees.claimed[msg.sender] - poolWeight;
-    }
-  }
-
-  /// @dev Transitions market to next state
-  function _nextState(uint256 marketId) private {
-    Market storage market = markets[marketId];
-    market.state = MarketState(uint256(market.state) + 1);
-  }
-
-  /// @dev Transitions market to last state
-  function _lastState(uint256 marketId) private {
-    Market storage market = markets[marketId];
-    market.state = MarketState.resolved;
-  }
-
-  /// @dev Emits a outcome price event for every outcome
-  function _emitMarketActionEvents(uint256 marketId) private {
-    Market storage market = markets[marketId];
-    uint256[] memory outcomeShares = new uint256[](market.outcomeCount);
-
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      outcomeShares[i] = market.outcomes[i].shares.available;
+    function setProtocolTreasury(address _treasury) external onlyOwner {
+        require(_treasury != address(0), "Invalid treasury");
+        emit ProtocolTreasuryUpdated(protocolTreasury, _treasury);
+        protocolTreasury = _treasury;
     }
 
-    emit MarketOutcomeShares(marketId, block.timestamp, outcomeShares, market.liquidity);
-  }
-
-  /// @dev Adds outcome shares to shares pool
-  function _addSharesToMarket(uint256 marketId, uint256 shares) private {
-    Market storage market = markets[marketId];
-
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      MarketOutcome storage outcome = market.outcomes[i];
-
-      outcome.shares.available = outcome.shares.available + shares;
-      outcome.shares.total = outcome.shares.total + shares;
-
-      // only adding to market total shares, the available remains
-      market.sharesAvailable = market.sharesAvailable + shares;
+    /// @notice Add or remove a token from the whitelist
+    function setTokenAllowed(address token, bool allowed) external onlyOwner {
+        allowedTokens[token] = allowed;
+        emit TokenWhitelistUpdated(token, allowed);
     }
 
-    market.balance = market.balance + shares;
-  }
-
-  /// @dev Removes outcome shares from shares pool
-  function _removeSharesFromMarket(uint256 marketId, uint256 shares) private {
-    Market storage market = markets[marketId];
-
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      MarketOutcome storage outcome = market.outcomes[i];
-
-      outcome.shares.available = outcome.shares.available - shares;
-      outcome.shares.total = outcome.shares.total - shares;
-
-      // only subtracting from market total shares, the available remains
-      market.sharesAvailable = market.sharesAvailable - shares;
+    /// @notice Pause all betting (emergency use)
+    function pause() external onlyOwner {
+        _pause();
     }
 
-    market.balance = market.balance - shares;
-  }
-
-  /// @dev Transfer outcome shares from pool to user balance
-  function _transferOutcomeSharesfromPool(
-    address user,
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 shares
-  ) private {
-    Market storage market = markets[marketId];
-    MarketOutcome storage outcome = market.outcomes[outcomeId];
-
-    // transfering shares from shares pool to user
-    outcome.shares.holders[user] = outcome.shares.holders[user] + shares;
-    outcome.shares.available = outcome.shares.available - shares;
-    market.sharesAvailable = market.sharesAvailable - shares;
-  }
-
-  /// @dev Transfer outcome shares from user balance back to pool
-  function _transferOutcomeSharesToPool(
-    address user,
-    uint256 marketId,
-    uint256 outcomeId,
-    uint256 shares
-  ) private {
-    Market storage market = markets[marketId];
-    MarketOutcome storage outcome = market.outcomes[outcomeId];
-
-    // adding shares back to pool
-    outcome.shares.holders[user] = outcome.shares.holders[user] - shares;
-    outcome.shares.available = outcome.shares.available + shares;
-    market.sharesAvailable = market.sharesAvailable + shares;
-  }
-
-  // ------ Core Functions End ------
-
-  // ------ Getters ------
-
-  function getUserMarketShares(uint256 marketId, address user)
-    external
-    view
-    returns (uint256 liquidity, uint256[] memory outcomes)
-  {
-    Market storage market = markets[marketId];
-    uint256[] memory outcomeShares = new uint256[](market.outcomeCount);
-
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      outcomeShares[i] = market.outcomes[i].shares.holders[user];
+    /// @notice Unpause betting
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
-    return (market.liquidityShares[user], outcomeShares);
-  }
-
-  function getUserClaimStatus(uint256 marketId, address user)
-    external
-    view
-    returns (
-      bool winningsToClaim,
-      bool winningsClaimed,
-      bool liquidityToClaim,
-      bool liquidityClaimed,
-      uint256 claimableFees
-    )
-  {
-    Market storage market = markets[marketId];
-
-    // market still not resolved
-    if (market.state != MarketState.resolved) {
-      return (false, false, false, false, getUserClaimableFees(marketId, user));
+    /// @notice Toggle emergency withdraw capability
+    /// @dev Requires explicit enable to prevent accidental fund drain
+    function setEmergencyWithdrawEnabled(bool enabled) external onlyOwner {
+        emergencyWithdrawEnabled = enabled;
+        emit EmergencyWithdrawToggled(enabled);
     }
 
-    MarketOutcome storage outcome = market.outcomes[market.resolution.outcomeId];
+    // ============ Market Creation ============
 
-    return (
-      outcome.shares.holders[user] > 0,
-      outcome.shares.claims[user],
-      market.liquidityShares[user] > 0,
-      market.liquidityClaims[user],
-      getUserClaimableFees(marketId, user)
-    );
-  }
-
-  function getUserLiquidityPoolShare(uint256 marketId, address user) external view returns (uint256) {
-    Market storage market = markets[marketId];
-
-    return (market.liquidityShares[user] * ONE) / market.liquidity;
-  }
-
-  function getUserClaimableFees(uint256 marketId, address user) public view returns (uint256) {
-    Market storage market = markets[marketId];
-
-    uint256 rawAmount = (market.fees.poolWeight * market.liquidityShares[user]) / market.liquidity;
-
-    // No fees left to claim
-    if (market.fees.claimed[user] > rawAmount) return 0;
-
-    return rawAmount - market.fees.claimed[user];
-  }
-
-  function getMarkets() external view returns (uint256[] memory) {
-    return marketIds;
-  }
-
-  function getMarketData(uint256 marketId)
-    external
-    view
-    returns (
-      MarketState state,
-      uint256 closesAt,
-      uint256 liquidity,
-      uint256 balance,
-      uint256 sharesAvailable,
-      int256 resolvedOutcomeId
-    )
-  {
-    Market storage market = markets[marketId];
-
-    return (
-      market.state,
-      market.closesAtTimestamp,
-      market.liquidity,
-      market.balance,
-      market.sharesAvailable,
-      getMarketResolvedOutcome(marketId)
-    );
-  }
-
-  function getMarketAltData(uint256 marketId)
-    external
-    view
-    returns (
-      uint256 buyFee,
-      bytes32 questionId,
-      uint256 questionIdUint,
-      address token,
-      uint256 buyTreasuryFee,
-      address treasury,
-      address realitio,
-      uint256 realitioTimeout,
-      address manager
-    )
-  {
-    Market storage market = markets[marketId];
-
-    return (
-      market.fees.buyFees.fee,
-      bytes32(0),
-      0,
-      address(market.token),
-      market.fees.buyFees.treasuryFee,
-      market.fees.treasury,
-      address(0),
-      0,
-      address(0)
-    );
-  }
-
-  function getMarketCreator(uint256 marketId) external view returns (address) {
-    Market storage market = markets[marketId];
-
-    return market.creator;
-  }
-
-  function getMarketPrices(uint256 marketId) external view returns (uint256 liquidity, uint256[] memory outcomes) {
-    Market storage market = markets[marketId];
-    uint256[] memory prices = new uint256[](market.outcomeCount);
-
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      prices[i] = getMarketOutcomePrice(marketId, i);
+    struct CreateMarketParams {
+        string question;
+        string image;
+        uint256 outcomeCount;
+        uint256 closesAt;
+        address token;
+        uint16 protocolFeeBps;
+        uint16 creatorFeeBps;
+        address creator;
     }
 
-    return (getMarketLiquidityPrice(marketId), prices);
-  }
+    /// @notice Create a new prediction market
+    /// @param params Market creation parameters
+    /// @return marketId The ID of the created market
+    function createMarket(CreateMarketParams calldata params) 
+        external 
+        nonReentrant
+        whenNotPaused
+        returns (uint256 marketId) 
+    {
+        require(params.outcomeCount >= 2 && params.outcomeCount <= MAX_OUTCOMES, "Invalid outcome count");
+        require(params.closesAt > block.timestamp, "Close time must be in future");
+        require(params.token != address(0), "Invalid token");
+        require(allowedTokens[params.token], "Token not whitelisted");
+        require(params.protocolFeeBps + params.creatorFeeBps <= MAX_FEE_BPS, "Fees too high");
+        require(params.creator != address(0), "Invalid creator");
 
-  function getMarketShares(uint256 marketId) external view returns (uint256 liquidity, uint256[] memory outcomes) {
-    Market storage market = markets[marketId];
-    uint256[] memory outcomeShares = new uint256[](market.outcomeCount);
+        marketId = marketCount++;
 
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      outcomeShares[i] = market.outcomes[i].shares.available;
+        Market storage market = markets[marketId];
+        market.question = params.question;
+        market.image = params.image;
+        market.outcomeCount = params.outcomeCount;
+        market.closesAt = params.closesAt;
+        market.token = params.token;
+        market.protocolFeeBps = params.protocolFeeBps;
+        market.creatorFeeBps = params.creatorFeeBps;
+        market.creator = params.creator;
+        market.state = MarketState.Open;
+
+        emit MarketCreated(
+            params.creator,
+            marketId,
+            params.outcomeCount,
+            params.question,
+            params.image,
+            params.token
+        );
     }
 
-    return (market.liquidity, outcomeShares);
-  }
+    // ============ Betting ============
 
-  function getMarketLiquidityPrice(uint256 marketId) public view returns (uint256) {
-    Market storage market = markets[marketId];
+    /// @notice Place a bet on an outcome
+    /// @param marketId The market to bet on
+    /// @param outcomeId The outcome to bet on (0-indexed)
+    /// @param amount The amount of USDC to bet
+    function bet(uint256 marketId, uint256 outcomeId, uint256 amount)
+        external
+        nonReentrant
+        whenNotPaused
+        marketExists(marketId)
+        onlyOpen(marketId)
+    {
+        Market storage market = markets[marketId];
+        require(outcomeId < market.outcomeCount, "Invalid outcome");
+        require(amount >= MIN_BET, "Below minimum bet");
+        
+        // Protection: Limit total pot size per market
+        require(market.totalPot + amount <= MAX_MARKET_POT, "Market pot limit reached");
+        
+        // Protection: Limit per-user exposure per market
+        uint256 userTotalInMarket = _getUserTotalBet(marketId, msg.sender);
+        require(userTotalInMarket + amount <= MAX_BET_PER_MARKET, "User bet limit reached");
 
-    if (market.state == MarketState.resolved && !isMarketVoided(marketId)) {
-      // resolved market, outcome prices are either 0 or 1
-      // final liquidity price = outcome shares / liquidity shares
-      return (market.outcomes[market.resolution.outcomeId].shares.available * ONE) / market.liquidity;
+        // Transfer USDC from user
+        IERC20(market.token).safeTransferFrom(msg.sender, address(this), amount);
+
+        // Add to pot and mint shares 1:1
+        market.totalPot += amount;
+        OutcomePool storage pool = outcomePools[marketId][outcomeId];
+        pool.totalShares += amount;
+        pool.shares[msg.sender] += amount;
+
+        emit BetPlaced(
+            msg.sender,
+            marketId,
+            outcomeId,
+            amount,
+            amount,  // shares = amount (1:1)
+            block.timestamp
+        );
     }
 
-    // liquidity price = # outcomes / (liquidity * sum (1 / every outcome shares)
-    uint256 marketSharesSum = 0;
+    // ============ Market Lifecycle ============
 
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      MarketOutcome storage outcome = market.outcomes[i];
+    /// @notice Lock a market early (stop accepting bets)
+    /// @param marketId The market to lock
+    function lockMarket(uint256 marketId)
+        external
+        nonReentrant
+        marketExists(marketId)
+        canResolve(marketId)
+    {
+        Market storage market = markets[marketId];
+        require(market.state == MarketState.Open, "Market not open");
 
-      marketSharesSum = marketSharesSum + (ONE * ONE) / outcome.shares.available;
+        market.state = MarketState.Locked;
+
+        emit MarketLocked(msg.sender, marketId, block.timestamp);
     }
 
-    return (market.outcomeCount * ONE * ONE * ONE) / market.liquidity / marketSharesSum;
-  }
+    /// @notice Resolve a market with a winning outcome
+    /// @param marketId The market to resolve
+    /// @param winningOutcome The winning outcome ID
+    function resolve(uint256 marketId, uint256 winningOutcome)
+        external
+        nonReentrant
+        marketExists(marketId)
+        onlyResolvable(marketId)
+        canResolve(marketId)
+    {
+        Market storage market = markets[marketId];
+        require(winningOutcome < market.outcomeCount, "Invalid outcome");
 
-  function getMarketResolvedOutcome(uint256 marketId) public view returns (int256) {
-    Market storage market = markets[marketId];
+        OutcomePool storage winningPool = outcomePools[marketId][winningOutcome];
+        uint256 winningShares = winningPool.totalShares;
 
-    // returning -1 if market still not resolved
-    if (market.state != MarketState.resolved) {
-      return -1;
+        uint256 protocolFee = 0;
+        uint256 creatorFee = 0;
+        uint256 netPot = market.totalPot;
+
+        if (winningShares == 0) {
+            // No one bet on winning outcome - fees take the entire pot
+            protocolFee = (market.totalPot * market.protocolFeeBps) / 10000;
+            creatorFee = market.totalPot - protocolFee;
+            netPot = 0;
+            market.payoutPerShare = 0;
+        } else {
+            // Calculate fees
+            protocolFee = (market.totalPot * market.protocolFeeBps) / 10000;
+            creatorFee = (market.totalPot * market.creatorFeeBps) / 10000;
+            netPot = market.totalPot - protocolFee - creatorFee;
+
+            // Calculate payout per share (18 decimal precision)
+            market.payoutPerShare = (netPot * ONE) / winningShares;
+        }
+
+        market.resolvedOutcome = winningOutcome;
+        market.state = MarketState.Resolved;
+
+        // Transfer fees
+        if (protocolFee > 0) {
+            IERC20(market.token).safeTransfer(protocolTreasury, protocolFee);
+        }
+        if (creatorFee > 0) {
+            IERC20(market.token).safeTransfer(market.creator, creatorFee);
+        }
+
+        emit MarketResolved(
+            msg.sender,
+            marketId,
+            winningOutcome,
+            market.totalPot,
+            protocolFee,
+            creatorFee,
+            block.timestamp
+        );
     }
 
-    return int256(market.resolution.outcomeId);
-  }
+    /// @notice Void a market (cancel it, allow refunds)
+    /// @param marketId The market to void
+    function voidMarket(uint256 marketId)
+        external
+        nonReentrant
+        marketExists(marketId)
+        onlyResolvable(marketId)
+        canResolve(marketId)
+    {
+        Market storage market = markets[marketId];
+        market.state = MarketState.Voided;
 
-  function isMarketVoided(uint256 marketId) public view returns (bool) {
-    Market storage market = markets[marketId];
-
-    // market still not resolved, still in valid state
-    if (market.state != MarketState.resolved) {
-      return false;
+        emit MarketVoided(msg.sender, marketId, block.timestamp);
     }
 
-    // resolved market id does not match any of the market ids
-    return market.resolution.outcomeId >= market.outcomeCount;
-  }
+    // ============ Claims ============
 
-  function getMarketBuyFee(uint256 marketId) public view returns (uint256) {
-    Market storage market = markets[marketId];
+    /// @notice Claim winnings from a resolved market
+    /// @param marketId The market to claim from
+    function claimWinnings(uint256 marketId)
+        external
+        nonReentrant
+        marketExists(marketId)
+    {
+        Market storage market = markets[marketId];
+        require(market.state == MarketState.Resolved, "Market not resolved");
 
-    return market.fees.buyFees.fee + market.fees.buyFees.treasuryFee + market.fees.buyFees.distributorFee;
-  }
+        OutcomePool storage winningPool = outcomePools[marketId][market.resolvedOutcome];
+        uint256 userShares = winningPool.shares[msg.sender];
+        require(userShares > 0, "No winning shares");
+        require(!winningPool.claimed[msg.sender], "Already claimed");
 
-  function getMarketSellFee(uint256 marketId) public view returns (uint256) {
-    Market storage market = markets[marketId];
+        winningPool.claimed[msg.sender] = true;
 
-    return market.fees.sellFees.fee + market.fees.sellFees.treasuryFee + market.fees.sellFees.distributorFee;
-  }
+        // Calculate payout
+        uint256 payout = (userShares * market.payoutPerShare) / ONE;
+        require(payout > 0, "No payout");
 
-  // alias of getMarketBuyFee, used for compatibility
-  function getMarketFee(uint256 marketId) public view returns (uint256) {
-    return getMarketBuyFee(marketId);
-  }
+        IERC20(market.token).safeTransfer(msg.sender, payout);
 
-  function getMarketFees(uint256 marketId)
-    external
-    view
-    returns (
-      Fees memory buyFees,
-      Fees memory sellFees,
-      address treasury,
-      address distributor
-    )
-  {
-    Market storage market = markets[marketId];
-
-    return (market.fees.buyFees, market.fees.sellFees, market.fees.treasury, market.fees.distributor);
-  }
-
-  // ------ Outcome Getters ------
-
-  function getMarketOutcomeIds(uint256 marketId) external view returns (uint256[] memory) {
-    Market storage market = markets[marketId];
-    uint256[] memory outcomeIds = new uint256[](market.outcomeCount);
-
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      outcomeIds[i] = i;
+        emit WinningsClaimed(
+            msg.sender,
+            marketId,
+            userShares,
+            payout,
+            block.timestamp
+        );
     }
 
-    return outcomeIds;
-  }
+    /// @notice Claim refund from a voided market
+    /// @param marketId The market to claim from
+    /// @param outcomeId The outcome you bet on
+    function claimRefund(uint256 marketId, uint256 outcomeId)
+        external
+        nonReentrant
+        marketExists(marketId)
+    {
+        Market storage market = markets[marketId];
+        require(market.state == MarketState.Voided, "Market not voided");
+        require(outcomeId < market.outcomeCount, "Invalid outcome");
 
-  function getMarketOutcomePrice(uint256 marketId, uint256 outcomeId) public view returns (uint256) {
-    Market storage market = markets[marketId];
+        OutcomePool storage pool = outcomePools[marketId][outcomeId];
+        uint256 userShares = pool.shares[msg.sender];
+        require(userShares > 0, "No shares to refund");
+        require(!pool.claimed[msg.sender], "Already claimed");
 
-    if (market.state == MarketState.resolved && !isMarketVoided(marketId)) {
-      // resolved market, price is either 0 or 1
-      return outcomeId == market.resolution.outcomeId ? ONE : 0;
+        pool.claimed[msg.sender] = true;
+
+        // Refund full amount (shares = amount in parimutuel)
+        IERC20(market.token).safeTransfer(msg.sender, userShares);
+
+        emit RefundClaimed(
+            msg.sender,
+            marketId,
+            outcomeId,
+            userShares,
+            block.timestamp
+        );
     }
 
-    // outcome price = 1 / (1 + sum(outcome shares / every outcome shares))
-    uint256 div = ONE;
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      if (i == outcomeId) continue;
+    // ============ View Functions ============
 
-      div = div + (market.outcomes[outcomeId].shares.available * ONE) / market.outcomes[i].shares.available;
+    /// @notice Get market data
+    function getMarketData(uint256 marketId)
+        external
+        view
+        marketExists(marketId)
+        returns (
+            MarketState state,
+            uint256 closesAt,
+            uint256 totalPot,
+            uint256 outcomeCount,
+            uint256 resolvedOutcome,
+            address creator,
+            uint16 protocolFeeBps,
+            uint16 creatorFeeBps
+        )
+    {
+        Market storage market = markets[marketId];
+        return (
+            market.state,
+            market.closesAt,
+            market.totalPot,
+            market.outcomeCount,
+            market.resolvedOutcome,
+            market.creator,
+            market.protocolFeeBps,
+            market.creatorFeeBps
+        );
     }
 
-    return (ONE * ONE) / div;
-  }
-
-  function getMarketOutcomeData(uint256 marketId, uint256 outcomeId)
-    external
-    view
-    returns (
-      uint256 price,
-      uint256 availableShares,
-      uint256 totalShares
-    )
-  {
-    Market storage market = markets[marketId];
-    MarketOutcome storage outcome = market.outcomes[outcomeId];
-
-    return (getMarketOutcomePrice(marketId, outcomeId), outcome.shares.available, outcome.shares.total);
-  }
-
-  function getMarketOutcomesShares(uint256 marketId) public view returns (uint256[] memory) {
-    Market storage market = markets[marketId];
-
-    uint256[] memory shares = new uint256[](market.outcomeCount);
-    for (uint256 i = 0; i < market.outcomeCount; ++i) {
-      shares[i] = market.outcomes[i].shares.available;
+    /// @notice Get all outcome pool sizes for a market
+    function getMarketPools(uint256 marketId)
+        external
+        view
+        marketExists(marketId)
+        returns (uint256[] memory pools)
+    {
+        Market storage market = markets[marketId];
+        pools = new uint256[](market.outcomeCount);
+        for (uint256 i = 0; i < market.outcomeCount; i++) {
+            pools[i] = outcomePools[marketId][i].totalShares;
+        }
     }
 
-    return shares;
-  }
-
-  function getMarketPaused(uint256 marketId) external view returns (bool) {
-    Market storage market = markets[marketId];
-
-    return market.paused;
-  }
-
-  // admin functions that can edit internal market variables
-  function updateMarket(uint256 marketId, MarketUpdateDescription memory update) external onlyOwner {
-    Market storage market = markets[marketId];
-    market.closesAtTimestamp = update.closesAtTimestamp;
-    market.balance = update.balance;
-    market.liquidity = update.liquidity;
-    market.sharesAvailable = update.sharesAvailable;
-    market.state = update.state;
-    market.outcomeCount = update.outcomeCount;
-    market.token = update.token;
-    market.creator = update.creator;
-    market.paused = update.paused;
-    market.fees.poolWeight = update.feesPoolWeight;
-    market.fees.treasury = update.feesTreasury;
-    market.fees.distributor = update.feesDistributor;
-    market.fees.buyFees = update.buyFees;
-    market.fees.sellFees = update.sellFees;
-    market.resolution.outcomeId = update.resolvedOutcomeId;
-  }
-
-  function updateMarketOutcome(
-    uint256 marketId,
-    uint256 outcomeId,
-    MarketOutcomeUpdateDescription memory update
-  ) external onlyOwner {
-    Market storage market = markets[marketId];
-    MarketOutcome storage outcome = market.outcomes[outcomeId];
-
-    outcome.id = update.id;
-    outcome.marketId = marketId;
-    outcome.shares.total = update.sharesTotal;
-    outcome.shares.available = update.sharesAvailable;
-  }
-
-  function updateMarketFeesHolders(uint256 marketId, MarketFeesHolderUpdateDescription[] memory updates)
-    external
-    onlyOwner
-  {
-    Market storage market = markets[marketId];
-
-    for (uint256 i = 0; i < updates.length; i++) {
-      MarketFeesHolderUpdateDescription memory update = updates[i];
-      market.fees.claimed[update.holder] = update.amount;
+    /// @notice Get a user's shares for all outcomes in a market
+    function getUserShares(uint256 marketId, address user)
+        external
+        view
+        marketExists(marketId)
+        returns (uint256[] memory shares)
+    {
+        Market storage market = markets[marketId];
+        shares = new uint256[](market.outcomeCount);
+        for (uint256 i = 0; i < market.outcomeCount; i++) {
+            shares[i] = outcomePools[marketId][i].shares[user];
+        }
     }
-  }
 
-  function updateMarketLiquidityHolders(uint256 marketId, MarketLiquidityHolderUpdateDescription[] memory updates)
-    external
-    onlyOwner
-  {
-    Market storage market = markets[marketId];
-
-    for (uint256 i = 0; i < updates.length; i++) {
-      MarketLiquidityHolderUpdateDescription memory update = updates[i];
-      market.liquidityShares[update.holder] = update.amount;
-      market.liquidityClaims[update.holder] = update.claim;
+    /// @notice Check if user has claimed for an outcome
+    function hasClaimed(uint256 marketId, uint256 outcomeId, address user)
+        external
+        view
+        marketExists(marketId)
+        returns (bool)
+    {
+        return outcomePools[marketId][outcomeId].claimed[user];
     }
-  }
 
-  function updateMarketOutcomeHolders(
-    uint256 marketId,
-    uint256 outcomeId,
-    MarketOutcomeHolderUpdateDescription[] memory updates
-  ) external onlyOwner {
-    Market storage market = markets[marketId];
-    MarketOutcome storage outcome = market.outcomes[outcomeId];
-
-    for (uint256 i = 0; i < updates.length; i++) {
-      MarketOutcomeHolderUpdateDescription memory update = updates[i];
-      outcome.shares.holders[update.holder] = update.amount;
-      outcome.shares.claims[update.holder] = update.claim;
-      outcome.shares.voidedClaims[update.holder] = update.voidedClaim;
+    /// @notice Get indicative prices (pool ratios) for all outcomes
+    function getIndicativePrices(uint256 marketId)
+        external
+        view
+        marketExists(marketId)
+        returns (uint256[] memory prices)
+    {
+        Market storage market = markets[marketId];
+        prices = new uint256[](market.outcomeCount);
+        
+        if (market.totalPot == 0) {
+            // Equal odds if no bets
+            uint256 equalPrice = ONE / market.outcomeCount;
+            for (uint256 i = 0; i < market.outcomeCount; i++) {
+                prices[i] = equalPrice;
+            }
+        } else {
+            for (uint256 i = 0; i < market.outcomeCount; i++) {
+                prices[i] = (outcomePools[marketId][i].totalShares * ONE) / market.totalPot;
+            }
+        }
     }
-  }
 
-  function withdraw(address token, uint256 amount) external onlyOwner {
-    IERC20(token).safeTransfer(msg.sender, amount);
-  }
+    /// @notice Calculate indicative payout for a bet (before fees)
+    /// @param marketId The market
+    /// @param outcomeId The outcome to bet on
+    /// @param amount The bet amount
+    /// @return payout The indicative payout if this outcome wins
+    function getIndicativePayout(uint256 marketId, uint256 outcomeId, uint256 amount)
+        external
+        view
+        marketExists(marketId)
+        returns (uint256 payout)
+    {
+        Market storage market = markets[marketId];
+        require(outcomeId < market.outcomeCount, "Invalid outcome");
+
+        uint256 newTotalPot = market.totalPot + amount;
+        uint256 newOutcomePool = outcomePools[marketId][outcomeId].totalShares + amount;
+        
+        uint256 totalFeeBps = market.protocolFeeBps + market.creatorFeeBps;
+        uint256 netPot = newTotalPot - (newTotalPot * totalFeeBps) / 10000;
+        
+        // User's share of the net pot
+        payout = (amount * netPot) / newOutcomePool;
+    }
+
+    /// @notice Get user's claimable amount (for resolved markets)
+    function getClaimableAmount(uint256 marketId, address user)
+        external
+        view
+        marketExists(marketId)
+        returns (uint256 amount, bool canClaim)
+    {
+        Market storage market = markets[marketId];
+        
+        if (market.state == MarketState.Resolved) {
+            OutcomePool storage winningPool = outcomePools[marketId][market.resolvedOutcome];
+            uint256 userShares = winningPool.shares[user];
+            if (userShares > 0 && !winningPool.claimed[user]) {
+                amount = (userShares * market.payoutPerShare) / ONE;
+                canClaim = true;
+            }
+        } else if (market.state == MarketState.Voided) {
+            // Check all outcomes for refundable shares
+            for (uint256 i = 0; i < market.outcomeCount; i++) {
+                OutcomePool storage pool = outcomePools[marketId][i];
+                if (pool.shares[user] > 0 && !pool.claimed[user]) {
+                    amount += pool.shares[user];
+                    canClaim = true;
+                }
+            }
+        }
+    }
+
+    /// @notice Get total shares for a specific outcome
+    function getOutcomePool(uint256 marketId, uint256 outcomeId)
+        external
+        view
+        marketExists(marketId)
+        returns (uint256)
+    {
+        return outcomePools[marketId][outcomeId].totalShares;
+    }
+
+    /// @notice Emergency withdraw (admin only, for stuck funds)
+    /// @dev Requires emergencyWithdrawEnabled to be true
+    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
+        require(emergencyWithdrawEnabled, "Emergency withdraw not enabled");
+        IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    // ============ Internal Functions ============
+
+    /// @notice Get total amount a user has bet in a market (across all outcomes)
+    function _getUserTotalBet(uint256 marketId, address user) internal view returns (uint256 total) {
+        Market storage market = markets[marketId];
+        for (uint256 i = 0; i < market.outcomeCount; i++) {
+            total += outcomePools[marketId][i].shares[user];
+        }
+    }
+
+    // ============ Solvency Check ============
+
+    /// @notice Verify contract has sufficient balance for a market's obligations
+    /// @dev Can be called by anyone to verify solvency
+    function checkMarketSolvency(uint256 marketId) 
+        external 
+        view 
+        marketExists(marketId) 
+        returns (bool solvent, uint256 required, uint256 available) 
+    {
+        Market storage market = markets[marketId];
+        required = market.totalPot;
+        available = IERC20(market.token).balanceOf(address(this));
+        solvent = available >= required;
+    }
 }

@@ -1,137 +1,31 @@
 "use client";
 
+/**
+ * Market Detail Page
+ *
+ * Detailed view of a single prediction market.
+ * Uses the centralized useMarket hook for data fetching.
+ */
+
 import { useState } from "react";
-import { useReadContract, usePublicClient } from "wagmi";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ChevronUp, ChevronDown } from "lucide-react";
-import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { MarketHeader } from "@/components/market/market-header";
 import { OutcomeLegend } from "@/components/market/outcome-legend";
 import { PriceChart } from "@/components/market/price-chart";
 import { MarketRules } from "@/components/market/market-rules";
 import { MarketTimeline } from "@/components/market/market-timeline";
 import { TradePanel } from "@/components/market/trade-panel";
-import { useQuery } from "@tanstack/react-query";
-import { MarketData } from "@/lib/types";
-import { parseAbiItem } from "viem";
-import { getOutcomeColor } from "@/lib/outcome-colors";
+import { useMarket } from "@/lib/hooks/use-markets";
 
 export default function MarketDetailPage() {
   const params = useParams();
   const id = BigInt(params.id as string);
-  const publicClient = usePublicClient();
   const [selectedOutcome, setSelectedOutcome] = useState(0);
-  const [outcomesExpanded, setOutcomesExpanded] = useState(true);
 
-  const { data: market, isLoading, error } = useQuery({
-    queryKey: ['market', id.toString()],
-    refetchInterval: 10000, // Refresh every 10 seconds to catch state changes
-    queryFn: async () => {
-        if (!publicClient) throw new Error("No client");
-
-        // Fetch market data from contract and outcome names from API in parallel
-        const [data, pricesData, metaResponse] = await Promise.all([
-          publicClient.readContract({
-            address: PREDICTION_MARKET_ADDRESS,
-            abi: PREDICTION_MARKET_ABI,
-            functionName: 'getMarketData',
-            args: [id]
-          }),
-          publicClient
-            .readContract({
-              address: PREDICTION_MARKET_ADDRESS,
-              abi: PREDICTION_MARKET_ABI,
-              functionName: "getMarketPrices",
-              args: [id],
-            })
-            .catch(() => [0n, []] as any),
-          // Fetch outcome names from API (stored in KV from Twitch)
-          fetch(`/api/markets/meta?marketId=${id.toString()}`)
-            .then(r => r.json())
-            .catch(() => null) as Promise<{ found: boolean; outcomes?: string[] } | null>,
-        ]);
-
-        // Fetch logs to get question and image
-        // We filter logs for this specific market ID to find the creation event
-        const logs = await publicClient.getLogs({
-            address: PREDICTION_MARKET_ADDRESS,
-            event: parseAbiItem('event MarketCreated(address indexed user, uint256 indexed marketId, uint256 outcomes, string question, string image, address token)'),
-            args: { marketId: id },
-            fromBlock: 'earliest'
-        });
-
-        if (logs.length === 0) {
-            throw new Error("Market creation log not found");
-        }
-
-        // Fetch ALL MarketActionTx logs (without filtering by marketId in the RPC call)
-        // Then filter in JS - this is more reliable across different RPC providers
-        const [creationLog, allActionLogs] = await Promise.all([
-            Promise.resolve(logs[0]),
-            publicClient.getLogs({
-                address: PREDICTION_MARKET_ADDRESS,
-                event: {
-                    type: 'event',
-                    name: 'MarketActionTx',
-                    inputs: [
-                        { name: 'user', type: 'address', indexed: true },
-                        { name: 'action', type: 'uint8', indexed: true },
-                        { name: 'marketId', type: 'uint256', indexed: true },
-                        { name: 'outcomeId', type: 'uint256', indexed: false },
-                        { name: 'shares', type: 'uint256', indexed: false },
-                        { name: 'value', type: 'uint256', indexed: false },
-                        { name: 'timestamp', type: 'uint256', indexed: false },
-                    ],
-                },
-                fromBlock: 'earliest'
-            })
-        ]);
-
-        // Filter logs for this specific market
-        const actionLogs = allActionLogs.filter(log => log.args.marketId === id);
-
-        const block = await publicClient.getBlock({ blockNumber: creationLog.blockNumber });
-
-        const prices = Array.isArray(pricesData?.[1])
-          ? (pricesData[1] as bigint[]).map((p) => Number(p) / 1e18)
-          : undefined;
-
-        // Calculate volume (buy + sell)
-        // Action 0 = Buy, 1 = Sell
-        const volume = actionLogs.reduce((acc, log) => {
-            const action = Number(log.args.action);
-            if (action === 0 || action === 1) {
-                return acc + (log.args.value || 0n);
-            }
-            return acc;
-        }, 0n);
-
-        // Get outcome names from API response
-        const outcomes = metaResponse?.found && metaResponse.outcomes 
-          ? metaResponse.outcomes 
-          : undefined;
-
-        return {
-            id,
-            question: creationLog.args.question!,
-            image: creationLog.args.image!,
-            token: "ETH", // Default for now
-            state: data[0],
-            closesAt: data[1],
-            liquidity: data[2],
-            balance: data[3],
-            sharesAvailable: data[4],
-            resolvedOutcomeId: data[5],
-            outcomeCount: Number(creationLog.args.outcomes),
-            createdAt: block.timestamp,
-            volume: volume,
-            prices,
-            outcomes,
-        } as MarketData;
-    },
-    enabled: !!publicClient
-  });
+  // Use centralized market hook
+  const { data: market, isLoading, error } = useMarket(id);
 
   if (isLoading) {
     return (
@@ -159,7 +53,7 @@ export default function MarketDetailPage() {
         : Array.from({ length: market.outcomeCount }).map((_, i) => `Option ${i + 1}`);
 
   const now = Date.now();
-  const closesAtMs = Number(market.closesAt) * 1000;
+  const closesAtMs = Number(market.closesAt) * 1_000;
   const isClosed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
   const isResolved = market.state === 2;
   const isReadOnly = isClosed || isResolved;

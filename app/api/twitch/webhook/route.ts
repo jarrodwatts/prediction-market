@@ -17,47 +17,22 @@ import {
   storeWalletStreamerProfile,
   storeMarketOutcomes,
 } from '@/lib/kv'
-import { createMarketWithLiquidity, resolveMarket, voidMarket, lockMarket } from '@/lib/liquidity'
+import { createMarket, resolveMarket, voidMarket, lockMarket } from '@/lib/market-service'
 import { recordEventSubWebhook } from '@/lib/dev/eventsub-debug'
-
-// Protocol treasury address (update with actual address)
-const PROTOCOL_TREASURY = process.env.PROTOCOL_TREASURY_ADDRESS || '0x0000000000000000000000000000000000000000'
-
-// In-memory cache to track processed message IDs (prevents duplicate webhook processing)
-// Note: In production with multiple instances, use Redis/KV instead
-const processedMessageIds = new Set<string>()
-const MAX_PROCESSED_IDS = 1000 // Prevent memory leak
-
-function markMessageProcessed(messageId: string): boolean {
-  if (processedMessageIds.has(messageId)) {
-    return false // Already processed
-  }
-  
-  // Clean up old entries if too many
-  if (processedMessageIds.size >= MAX_PROCESSED_IDS) {
-    const iterator = processedMessageIds.values()
-    for (let i = 0; i < 100; i++) {
-      const val = iterator.next().value
-      if (val) processedMessageIds.delete(val)
-    }
-  }
-  
-  processedMessageIds.add(messageId)
-  return true // First time seeing this message
-}
+import { markWebhookProcessed } from '@/lib/webhook-dedup'
+import { withIdempotency, checkOperation } from '@/lib/idempotency'
+import { logger } from '@/lib/logger'
+import { TWITCH } from '@/lib/config'
+import { runInBackground } from '@/lib/background-tasks'
+import { checkRateLimit } from '@/lib/rate-limit'
 
 /**
  * Fetch Twitch user's profile image URL
  */
 async function getTwitchProfileImage(userId: string): Promise<string | undefined> {
   try {
-    const clientId = process.env.TWITCH_CLIENT_ID
-    const clientSecret = process.env.TWITCH_CLIENT_SECRET
-    
-    if (!clientId || !clientSecret) {
-      console.log('Missing Twitch credentials, skipping profile image fetch')
-      return undefined
-    }
+    const clientId = TWITCH.CLIENT_ID
+    const clientSecret = TWITCH.CLIENT_SECRET
     
     // Get an app access token
     const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
@@ -102,18 +77,22 @@ async function getTwitchProfileImage(userId: string): Promise<string | undefined
 }
 
 export async function POST(request: NextRequest) {
-  console.log('=== Twitch Webhook Received ===')
-  
+  const requestStartTime = Date.now()
+  let messageId = 'unknown' // Declare at function scope
+
+  // Rate limit check BEFORE signature verification (prevent DoS)
+  const rateLimitResponse = await checkRateLimit(request, 'webhook')
+  if (rateLimitResponse) return rateLimitResponse
+
   try {
     const body = await request.text()
     const headers = getTwitchHeaders(request.headers)
-    
-    console.log('Headers:', {
-      messageId: headers.messageId ? 'present' : 'missing',
-      timestamp: headers.timestamp ? 'present' : 'missing',
-      signature: headers.signature ? 'present' : 'missing',
-      messageType: headers.messageType,
-    })
+    messageId = headers.messageId || 'unknown' // Capture early
+
+    logger.webhook.received(
+      headers.messageId || 'unknown',
+      headers.messageType || 'unknown'
+    )
     
     // For verification challenges, we need to respond quickly
     // Parse the body first to check message type
@@ -290,17 +269,17 @@ export async function POST(request: NextRequest) {
     
     // Handle notifications
     if (headers.messageType === MESSAGE_TYPE_NOTIFICATION) {
-      // DEDUPLICATION: Check if we've already processed this message
-      if (!markMessageProcessed(headers.messageId)) {
-        console.log(`⏭️ Duplicate message ${headers.messageId}, skipping`)
+      // DEDUPLICATION: Check if we've already processed this message (distributed via KV)
+      const { isNew, reason } = await markWebhookProcessed(headers.messageId, headers.timestamp)
+      if (!isNew) {
+        logger.webhook.duplicate(headers.messageId, reason || 'Unknown reason')
         return NextResponse.json({ received: true })
       }
-      
+
       const subscriptionType = payload.subscription.type
       const event = payload.event
-      
-      console.log(`📢 Received EventSub notification: ${subscriptionType}`)
-      console.log('Event:', JSON.stringify(event, null, 2))
+
+      logger.webhook.processing(headers.messageId, subscriptionType, event.id || 'unknown')
       
       switch (subscriptionType) {
         case 'channel.prediction.begin':
@@ -318,11 +297,15 @@ export async function POST(request: NextRequest) {
         default:
           console.log(`Unhandled subscription type: ${subscriptionType}`)
       }
+
+      // Log successful webhook processing
+      const duration = Date.now() - requestStartTime
+      logger.webhook.completed(headers.messageId, duration)
     }
-    
+
     return NextResponse.json({ received: true })
   } catch (error) {
-    console.error('Error processing webhook:', error)
+    logger.webhook.failed(messageId, error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -331,34 +314,62 @@ export async function POST(request: NextRequest) {
  * Handle prediction.begin - Create a new market
  */
 async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
-  console.log(`🎯 Prediction started: ${event.title}`)
-  
-  // IDEMPOTENCY CHECK: Skip if we've already created a market for this prediction
+  const operationKey = `create_market:${event.id}`
+
+  logger.info('Prediction started', {
+    predictionId: event.id,
+    title: event.title,
+  })
+
+  // IDEMPOTENCY CHECK: Check if operation already in progress or completed
+  const existingOp = await checkOperation(operationKey)
+  if (existingOp) {
+    if (existingOp.status === 'completed') {
+      logger.market.duplicate(event.id, 'completed')
+      return
+    }
+    if (existingOp.status === 'pending') {
+      logger.market.duplicate(event.id, 'pending')
+      return
+    }
+    // If failed, we'll retry below
+  }
+
+  // Double-check KV for existing market (belt and suspenders)
   const existingMarket = await getPredictionData(event.id)
-  if (existingMarket) {
-    console.log(`⏭️ Market already exists for prediction ${event.id} (market ID: ${existingMarket.marketId}), skipping`)
+  if (existingMarket?.marketId) {
+    logger.market.duplicate(event.id, `exists: ${existingMarket.marketId}`)
     return
   }
-  
+
   // Get streamer session to find their wallet address
   const streamerSession = await getStreamerSession(event.broadcaster_user_id)
-  
+
   if (!streamerSession) {
-    console.log(`⚠️ Streamer ${event.broadcaster_user_login} not registered, skipping market creation`)
+    logger.warn('Streamer not registered, skipping market creation', {
+      predictionId: event.id,
+      streamerLogin: event.broadcaster_user_login,
+    })
     return
   }
-  
-  console.log(`✅ Streamer found, wallet: ${streamerSession.walletAddress}`)
-  
+
+  if (!streamerSession.walletAddress) {
+    logger.warn('Streamer has no wallet configured, skipping', {
+      predictionId: event.id,
+      streamerLogin: event.broadcaster_user_login,
+    })
+    return
+  }
+
   // Calculate close time from locks_at
   const locksAt = Math.floor(new Date(event.locks_at).getTime() / 1000)
-  
+
   // Create outcome mapping (Twitch outcome ID -> our index)
   const outcomeMap: Record<string, number> = {}
   event.outcomes.forEach((outcome, index) => {
     outcomeMap[outcome.id] = index
   })
-  
+
   // OPTIMIZATION: Store to KV IMMEDIATELY so UI can show "pending" state
   // This allows the overlay to display the prediction instantly while the market is being created on-chain
   await storePredictionMapping(event.id, {
@@ -371,53 +382,110 @@ async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
     createdAt: Date.now(),
     state: 'pending',
   })
-  
-  console.log(`📝 Prediction stored immediately (pending on-chain creation)`)
-  
+
   try {
-    // Fetch streamer's profile image from Twitch
-    const profileImage = await getTwitchProfileImage(event.broadcaster_user_id)
+    // Use idempotency wrapper to prevent duplicate market creation
+    const marketCreationStartTime = Date.now()
+    const result = await withIdempotency(operationKey, async () => {
+      logger.market.creating(event.id, event.title)
 
-    // Cache reverse lookup (wallet -> Twitch profile) for market cards
-    await storeWalletStreamerProfile(streamerSession.walletAddress, {
-      twitchUserId: event.broadcaster_user_id,
-      twitchLogin: event.broadcaster_user_login,
-      twitchDisplayName: event.broadcaster_user_name,
-      profileImageUrl: profileImage,
-    })
-    
-    console.log(`Creating market with ${event.outcomes.length} outcomes, closes at ${new Date(locksAt * 1000).toISOString()}`)
-    
-    // Create the market with liquidity (this takes a few seconds)
-    const { marketId, txHash } = await createMarketWithLiquidity({
-      question: event.title,
-      outcomes: event.outcomes.length,
-      closesAt: locksAt,
-      distributorAddress: streamerSession.walletAddress,
-      treasuryAddress: PROTOCOL_TREASURY,
-      image: profileImage,
-    })
-    
-    console.log(`✅ Market created: ${marketId} (tx: ${txHash})`)
-    
-    // Update KV with the market ID now that it's confirmed on-chain
-    await updatePredictionMapping(event.id, {
-      marketId,
-      state: 'active',
+      // Create market
+      const { marketId, txHash } = await createMarket({
+        question: event.title,
+        outcomeCount: event.outcomes.length,
+        closesAt: locksAt,
+        creatorAddress: streamerSession.walletAddress!,
+        image: undefined, // Will cache profile in background for future markets
+      })
+
+      // AFTER market created, fetch profile in background (non-blocking)
+      runInBackground('fetch-profile-' + event.broadcaster_user_id, async () => {
+        const profileImage = await getTwitchProfileImage(event.broadcaster_user_id)
+
+        // Cache reverse lookup (wallet -> Twitch profile) for future markets
+        await storeWalletStreamerProfile(streamerSession.walletAddress!, {
+          twitchUserId: event.broadcaster_user_id,
+          twitchLogin: event.broadcaster_user_login,
+          twitchDisplayName: event.broadcaster_user_name,
+          profileImageUrl: profileImage,
+        })
+
+        logger.debug('Profile image cached for future markets', {
+          userId: event.broadcaster_user_id,
+          profileImage,
+        })
+      })
+
+      // Update KV with the market ID now that it's confirmed on-chain
+      await updatePredictionMapping(event.id, {
+        marketId,
+        state: 'active',
+      })
+
+      // Store market-level outcomes (for list/card rendering)
+      // Best-effort: if KV fails, don't break webhook processing
+      try {
+        await storeMarketOutcomes(marketId, event.outcomes.map((o) => o.title))
+      } catch (e) {
+        logger.error('Failed to store market outcomes (non-critical)', e)
+      }
+
+      return { marketId, txHash }
     })
 
-    // Store market-level outcomes (for list/card rendering)
-    // Best-effort: if KV fails, don't break webhook processing
-    try {
-      await storeMarketOutcomes(marketId, event.outcomes.map((o) => o.title))
-    } catch {}
-    
-    console.log(`✅ Prediction mapping updated with marketId ${marketId}`)
+    const marketCreationDuration = Date.now() - marketCreationStartTime
+    logger.market.created(event.id, result.marketId, result.txHash, marketCreationDuration)
+
+    // CHECK: Was lock event received while we were creating the market?
+    const updatedPrediction = await getPredictionData(event.id)
+    if (updatedPrediction?.pendingLock) {
+      logger.info('Processing pending lock after market creation', {
+        predictionId: event.id,
+        marketId: result.marketId.toString(),
+      })
+
+      // Lock the market immediately
+      try {
+        const lockTxHash = await lockMarket(result.marketId)
+        if (lockTxHash) {
+          logger.market.locked(result.marketId, lockTxHash)
+          await updatePredictionMapping(event.id, {
+            state: 'locked',
+            pendingLock: false
+          })
+        }
+      } catch (error) {
+        logger.error('Failed to apply pending lock', error, {
+          predictionId: event.id,
+          marketId: result.marketId.toString(),
+        })
+      }
+    }
   } catch (error) {
-    console.error('❌ Error creating market:', error)
-    // Clean up the pending entry on error
-    await clearActivePrediction(event.broadcaster_user_id)
-    // Don't throw - we don't want to cause Twitch to retry
+    // Check if circuit breaker is open
+    if (error instanceof Error && error.message.includes('Circuit breaker open')) {
+      logger.error('Market creation skipped - RPC circuit breaker open', error, {
+        predictionId: event.id,
+      })
+
+      // Update prediction state to indicate RPC unavailable
+      await updatePredictionMapping(event.id, {
+        state: 'failed',
+      })
+
+      // Return 200 to Twitch (don't retry - service is down)
+      return
+    }
+
+    logger.market.failed(event.id, error)
+
+    // Update prediction state to failed
+    await updatePredictionMapping(event.id, {
+      state: 'failed',
+    })
+
+    // Note: We DON'T throw here - returning 200 to Twitch prevents retries
+    // The UI will show the prediction as "failed to create market"
   }
 }
 
@@ -426,30 +494,37 @@ async function handlePredictionBegin(event: TwitchPredictionBeginEvent) {
  */
 async function handlePredictionLock(event: TwitchPredictionLockEvent) {
   console.log(`🔒 Prediction locked: ${event.title}`)
-  
+
   const predictionData = await getPredictionData(event.id)
-  
+
   if (!predictionData) {
     console.log(`⚠️ No market found for prediction ${event.id}`)
     return
   }
-  
+
   // OPTIMIZATION: Update KV state to 'locked' IMMEDIATELY
   // This allows the UI to show "locked" state before the on-chain tx confirms
-  await updatePredictionMapping(event.id, { state: 'locked' })
+  await updatePredictionMapping(event.id, {
+    state: 'locked',
+    pendingLock: !predictionData.marketId // Flag if market not yet created
+  })
   console.log(`📝 KV state updated to 'locked' immediately`)
-  
+
   try {
-    // Only proceed with on-chain lock if we have a marketId
+    // If market not yet created, the flag will be checked after creation
     if (!predictionData.marketId) {
-      console.log(`⚠️ Market not yet created on-chain for prediction ${event.id}`)
+      logger.info('Lock received before market created, flagging for later', {
+        predictionId: event.id,
+      })
       return
     }
     
     const txHash = await lockMarket(predictionData.marketId)
-    
+
     if (txHash) {
       console.log(`✅ Market ${predictionData.marketId} locked on-chain (tx: ${txHash})`)
+      // Clear pending flag on success
+      await updatePredictionMapping(event.id, { pendingLock: false })
     } else {
       console.log(`⏭️ Market ${predictionData.marketId} was already locked or not open`)
     }

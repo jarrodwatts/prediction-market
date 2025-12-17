@@ -1,23 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { storeStreamerSession, getStreamerSession, storeWalletStreamerProfile } from '@/lib/kv'
-import { subscribeToChannelPredictions } from '@/lib/twitch/eventsub'
-import { auth } from '@/lib/auth'
+import { requireChannelOwnership } from '@/lib/middleware/auth'
+import { validateBody, validateSearchParams } from '@/lib/middleware/validation'
+import { streamerSettingsPostSchema, streamerSettingsGetSchema } from '@/lib/validation/schemas'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { channelId, walletAddress, defaultLiquidity } = body
+    // Validate request body
+    const { data: body, error: validationError } = await validateBody(
+      request,
+      streamerSettingsPostSchema
+    )
+    if (validationError) return validationError
 
-    if (!channelId || !walletAddress) {
-      return NextResponse.json(
-        { error: 'channelId and walletAddress are required' },
-        { status: 400 }
-      )
-    }
+    // Verify user owns this channel
+    const { error: authError } = await requireChannelOwnership(body.channelId)
+    if (authError) return authError
+
+    const { channelId, walletAddress } = body
 
     // Get existing session or create new one
     const existingSession = await getStreamerSession(channelId)
-    
+
     // Update session with wallet address
     await storeStreamerSession(channelId, {
       accessToken: existingSession?.accessToken || '',
@@ -49,17 +53,18 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const channelId = searchParams.get('channelId')
+    // Validate query params
+    const { data: params, error: validationError } = validateSearchParams(
+      request,
+      streamerSettingsGetSchema
+    )
+    if (validationError) return validationError
 
-    if (!channelId) {
-      return NextResponse.json(
-        { error: 'channelId is required' },
-        { status: 400 }
-      )
-    }
+    // Verify user owns this channel
+    const { error: authError } = await requireChannelOwnership(params.channelId)
+    if (authError) return authError
 
-    const session = await getStreamerSession(channelId)
+    const session = await getStreamerSession(params.channelId)
 
     if (!session) {
       return NextResponse.json(

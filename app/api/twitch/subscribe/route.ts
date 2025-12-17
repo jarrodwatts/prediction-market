@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { storeStreamerSession, storeWalletStreamerProfile } from '@/lib/kv'
+import { validateBody } from '@/lib/middleware/validation'
+import { subscribeBodySchema } from '@/lib/validation/schemas'
 
 const TWITCH_API_URL = 'https://api.twitch.tv/helix/eventsub/subscriptions'
 const TWITCH_TOKEN_URL = 'https://id.twitch.tv/oauth2/token'
@@ -106,15 +108,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const body = await request.json()
-    const { walletAddress } = body
+    // Validate request body
+    const { data: body, error: validationError } = await validateBody(
+      request,
+      subscribeBodySchema
+    )
+    if (validationError) return validationError
 
-    if (!walletAddress) {
-      return NextResponse.json(
-        { error: 'walletAddress is required' },
-        { status: 400 }
-      )
-    }
+    const { walletAddress } = body
 
     const clientId = process.env.TWITCH_CLIENT_ID!
     const webhookSecret = process.env.TWITCH_WEBHOOK_SECRET!
@@ -252,7 +253,7 @@ export async function POST(request: NextRequest) {
       accessToken: session.accessToken,
       refreshToken: '', // We don't have refresh token in session currently
       walletAddress,
-      expiresAt: Date.now() + 3600000, // 1 hour from now
+      expiresAt: Date.now() + 3_600_000, // 1 hour from now
       twitchLogin: session.twitchLogin,
       twitchDisplayName: session.twitchDisplayName,
       profileImageUrl,

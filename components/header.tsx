@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { Github, TrendingUp } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { ConnectWalletButton } from "@/components/connect-wallet-button";
-import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { cn } from "@/lib/utils";
 
 export function Header() {

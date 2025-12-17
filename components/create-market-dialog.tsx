@@ -1,143 +1,182 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { useState, useEffect } from "react";
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from "wagmi";
-import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
-import { parseEther } from "viem";
-import { Loader2, AlertCircle } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { parseError } from "@/lib/errors";
+"use client"
+
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { useState, useCallback, useMemo } from "react"
+import { useWriteContract, useWaitForTransactionReceipt, useAccount } from "wagmi"
+import { useQueryClient } from "@tanstack/react-query"
+import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract"
+import { USDC } from "@/lib/tokens"
+import { Loader2, AlertCircle } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { parseError } from "@/lib/errors"
+import { queryKeys } from "@/lib/query-keys"
+import { z } from "zod"
+
+// Form validation schema
+const createMarketSchema = z.object({
+  question: z
+    .string()
+    .min(10, "Question must be at least 10 characters")
+    .max(200, "Question must be at most 200 characters"),
+  image: z
+    .string()
+    .url("Must be a valid URL")
+    .optional()
+    .or(z.literal("")),
+  duration: z
+    .string()
+    .regex(/^\d+$/, "Duration must be a positive number")
+    .refine((val) => parseInt(val) >= 1 && parseInt(val) <= 365, "Duration must be between 1 and 365 days"),
+})
+
+type FormData = z.infer<typeof createMarketSchema>
+type FieldErrors = Partial<Record<keyof FormData, string>>
 
 interface CreateMarketDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }
 
 export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogProps) {
-  const [question, setQuestion] = useState("");
-  const [image, setImage] = useState("");
-  const [duration, setDuration] = useState("7"); // Days
-  const [initialLiquidity, setInitialLiquidity] = useState("0.1");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [question, setQuestion] = useState("")
+  const [image, setImage] = useState("")
+  const [duration, setDuration] = useState("7")
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
 
-  const { isConnected, chainId } = useAccount();
+  const { isConnected, address } = useAccount()
+  const queryClient = useQueryClient()
 
-  const { data: wethAddress, error: wethError } = useReadContract({
-    address: PREDICTION_MARKET_ADDRESS,
-    abi: PREDICTION_MARKET_ABI,
-    functionName: 'WETH',
-    query: {
-        enabled: open, // Only fetch when open to save RPC calls
+  const { writeContract, isPending: isWritePending, error: writeError, reset } = useWriteContract()
+  const { isLoading: isConfirming } = useWaitForTransactionReceipt({
+    hash: undefined, // We handle success via onSuccess callback
+  })
+
+  // Derive error message from writeError - no useEffect needed
+  const error = useMemo(() => {
+    if (writeError) {
+      const parsed = parseError(writeError, "createMarket")
+      return parsed.suggestion 
+        ? `${parsed.message} ${parsed.suggestion}`
+        : parsed.message
     }
-  });
+    return null
+  }, [writeError])
 
-  const { writeContract, data: hash, isPending: isWritePending, error: writeError } = useWriteContract();
+  // Reset form state
+  const resetForm = useCallback(() => {
+    setQuestion("")
+    setImage("")
+    setDuration("7")
+    setFieldErrors({})
+    reset()
+  }, [reset])
 
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
-    hash,
-  });
-
-  useEffect(() => {
-    if (isSuccess && open) {
-       onOpenChange(false);
-       // Reset form
-       setQuestion("");
-       setImage("");
-       setInitialLiquidity("0.1");
-       setError(null);
+  // Handle dialog close - reset state
+  const handleOpenChange = useCallback((isOpen: boolean) => {
+    if (!isOpen) {
+      resetForm()
     }
-  }, [isSuccess, open, onOpenChange]);
+    onOpenChange(isOpen)
+  }, [onOpenChange, resetForm])
 
-  useEffect(() => {
-      if (writeError) {
-          const parsed = parseError(writeError, "createMarket");
-          setError(parsed.suggestion 
-            ? `${parsed.message} ${parsed.suggestion}`
-            : parsed.message);
-          setIsSubmitting(false);
+  // Validate form and return errors
+  const validateForm = useCallback((): { valid: true; data: FormData } | { valid: false; errors: FieldErrors } => {
+    const result = createMarketSchema.safeParse({
+      question,
+      image: image || undefined,
+      duration,
+    })
+
+    if (!result.success) {
+      const errors: FieldErrors = {}
+      for (const issue of result.error.issues) {
+        const field = issue.path[0] as keyof FormData
+        if (!errors[field]) {
+          errors[field] = issue.message
+        }
       }
-      if (wethError) {
-        console.error("Error fetching WETH:", wethError);
-      }
-  }, [writeError, wethError]);
-
-  const handleCreate = async () => {
-    setError(null);
-    if (!isConnected) {
-        setError("Wallet not connected");
-        return;
-    }
-    if (!wethAddress) {
-        setError("Failed to load WETH address from contract. Check network connection.");
-        return;
+      return { valid: false, errors }
     }
 
-    setIsSubmitting(true);
+    return { valid: true, data: result.data }
+  }, [question, image, duration])
+
+  // Real-time validation for better UX
+  const currentErrors = useMemo(() => {
+    const validation = validateForm()
+    return validation.valid ? {} : validation.errors
+  }, [validateForm])
+
+  const handleCreate = useCallback(() => {
+    setFieldErrors({})
+
+    if (!isConnected || !address) {
+      return // Will show via UI state
+    }
+
+    const validation = validateForm()
+    if (!validation.valid) {
+      setFieldErrors(validation.errors)
+      return
+    }
 
     try {
-      const closesAt = BigInt(Math.floor(Date.now() / 1000) + (Number(duration) * 24 * 60 * 60));
-      const value = parseEther(initialLiquidity);
+      const closesAt = BigInt(Math.floor(Date.now() / 1_000) + (Number(validation.data.duration) * 24 * 60 * 60))
       
-      // Fees: 1% each = 100 basis points (10000 = 100%)
-      const defaultFees = {
-        fee: 100n,           // 1% to liquidity providers
-        treasuryFee: 100n,   // 1% to treasury
-        distributorFee: 100n // 1% to distributor
-      };
+      const params = {
+        question: validation.data.question,
+        image: validation.data.image || "",
+        outcomeCount: 2n,
+        closesAt,
+        token: USDC.address,
+        protocolFeeBps: 100,
+        creatorFeeBps: 100,
+        creator: address,
+      }
 
-      const desc = {
-        value,
-        closesAt: Number(closesAt),
-        outcomes: 2n,
-        token: wethAddress,
-        distribution: [50n, 50n],
-        question,
-        image,
-        buyFees: defaultFees,
-        sellFees: defaultFees,
-        treasury: "0x0000000000000000000000000000000000000000" as `0x${string}`,
-        distributor: "0x0000000000000000000000000000000000000000" as `0x${string}`
-      };
-
-      console.log("Creating market with:", desc);
-
-      writeContract({
-        address: PREDICTION_MARKET_ADDRESS,
-        abi: PREDICTION_MARKET_ABI,
-        functionName: 'createMarketWithETH',
-        args: [desc],
-        value: value
-      });
-    } catch (error: unknown) {
-      const parsed = parseError(error, "createMarket");
-      setError(parsed.suggestion 
-        ? `${parsed.message} ${parsed.suggestion}`
-        : parsed.message);
-      setIsSubmitting(false);
+      writeContract(
+        {
+          address: PREDICTION_MARKET_ADDRESS,
+          abi: PREDICTION_MARKET_ABI,
+          functionName: 'createMarket',
+          args: [params],
+        },
+        {
+          onSuccess: () => {
+            // Invalidate markets query to refresh the list
+            queryClient.invalidateQueries({ queryKey: queryKeys.markets.list() })
+            // Reset form and close dialog
+            handleOpenChange(false)
+          },
+        }
+      )
+    } catch (err: unknown) {
+      console.error("Error creating market:", err)
     }
-  };
+  }, [isConnected, address, validateForm, writeContract, queryClient, handleOpenChange])
 
-  const isLoading = isWritePending || isConfirming || isSubmitting;
+  const isLoading = isWritePending || isConfirming
+  const hasFieldErrors = Object.keys(currentErrors).length > 0
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Create New Market</DialogTitle>
           <DialogDescription>
-            Deploy a new binary (Yes/No) prediction market.
+            Deploy a new binary (Yes/No) prediction market. Bets use USDC.
           </DialogDescription>
         </DialogHeader>
         
         {error && (
-            <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-            </Alert>
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         <div className="grid gap-4 py-4">
@@ -148,47 +187,51 @@ export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogPro
               placeholder="Will ETH hit $10k?"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
+              aria-invalid={!!fieldErrors.question || !!currentErrors.question}
             />
+            {(fieldErrors.question || currentErrors.question) && (
+              <p className="text-xs text-destructive">{fieldErrors.question || currentErrors.question}</p>
+            )}
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="image">Image URL</Label>
+            <Label htmlFor="image">Image URL (optional)</Label>
             <Input
               id="image"
               placeholder="https://..."
               value={image}
               onChange={(e) => setImage(e.target.value)}
+              aria-invalid={!!fieldErrors.image || !!currentErrors.image}
             />
+            {(fieldErrors.image || currentErrors.image) && (
+              <p className="text-xs text-destructive">{fieldErrors.image || currentErrors.image}</p>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="liquidity">Liquidity (ETH)</Label>
-              <Input
-                id="liquidity"
-                type="number"
-                value={initialLiquidity}
-                onChange={(e) => setInitialLiquidity(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="duration">Duration (Days)</Label>
-              <Input
-                id="duration"
-                type="number"
-                value={duration}
-                onChange={(e) => setDuration(e.target.value)}
-              />
-            </div>
+          <div className="grid gap-2">
+            <Label htmlFor="duration">Duration (Days)</Label>
+            <Input
+              id="duration"
+              type="number"
+              min="1"
+              max="365"
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              aria-invalid={!!fieldErrors.duration || !!currentErrors.duration}
+            />
+            {(fieldErrors.duration || currentErrors.duration) && (
+              <p className="text-xs text-destructive">{fieldErrors.duration || currentErrors.duration}</p>
+            )}
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={handleCreate} disabled={isLoading || !question}>
+          <Button 
+            onClick={handleCreate} 
+            disabled={isLoading || !question || hasFieldErrors || !isConnected}
+          >
             {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {isConfirming ? "Confirming..." : isWritePending ? "Check Wallet..." : "Create Market"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
+  )
 }
-
-

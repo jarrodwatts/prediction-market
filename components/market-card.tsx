@@ -1,15 +1,5 @@
 "use client";
 
-/**
- * Market Card Component
- *
- * Displays a market preview with:
- * - Full-width cover image
- * - Probability Bar (for binary markets)
- * - Outcome Buttons (Yes/No)
- * - Volume and liquidity stats in footer
- */
-
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -19,11 +9,8 @@ import { BarChart3, Clock, Droplets, Trophy } from "lucide-react";
 import { formatCompact, formatPricePercent, formatTimeRemaining } from "@/lib/formatters";
 import { getOutcomeColor, sortBinaryOutcomes } from "@/lib/outcome-colors";
 import type { MarketData } from "@/lib/types";
-import { formatEther } from "viem";
-
-// =============================================================================
-// Market Card Component
-// =============================================================================
+import { formatUnits } from "viem";
+import { USDC } from "@/lib/tokens";
 
 interface MarketCardProps {
   market: MarketData;
@@ -142,29 +129,29 @@ export function MarketCard({ market, onClick }: MarketCardProps) {
 
         <CardContent className="flex flex-1 flex-col px-4 pt-3 pb-2 relative z-10 -mt-px bg-background/40 backdrop-blur-[2px]">
           {/* Creator */}
-          {market.creator && (
+          {market.creatorInfo && (
             <div className="mb-2 flex items-center gap-2">
               <Avatar className="h-6 w-6 border border-border/60">
-                <AvatarImage src={market.creator.imageUrl} alt={market.creator.name} />
+                <AvatarImage src={market.creatorInfo.imageUrl} alt={market.creatorInfo.name} />
                 <AvatarFallback className="text-[10px]">
-                  {(market.creator.name || "S").slice(0, 2).toUpperCase()}
+                  {(market.creatorInfo.name || "S").slice(0, 2).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
-              {market.creator.url ? (
+              {market.creatorInfo.url ? (
                 <button
                   type="button"
                   className="text-left text-xs font-medium text-muted-foreground hover:text-foreground transition-colors truncate"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    window.open(market.creator!.url!, "_blank", "noreferrer");
+                    window.open(market.creatorInfo!.url!, "_blank", "noreferrer");
                   }}
                 >
-                  {market.creator.name}
+                  {market.creatorInfo.name}
                 </button>
               ) : (
                 <span className="text-xs font-medium text-muted-foreground truncate">
-                  {market.creator.name}
+                  {market.creatorInfo.name}
                 </span>
               )}
             </div>
@@ -227,7 +214,7 @@ export function MarketCard({ market, onClick }: MarketCardProps) {
                 <div className="flex items-center gap-2">
                   <Droplets className="w-4 h-4" />
                   <span>
-                    Liq: {formatCompact(Number(formatEther(market.liquidity)), { prefix: "" })} ETH
+                    Pool: {formatCompact(Number(formatUnits(market.totalPot, USDC.decimals)), { prefix: "$" })}
                   </span>
                 </div>
               </div>
@@ -240,11 +227,11 @@ export function MarketCard({ market, onClick }: MarketCardProps) {
             <div className="flex items-center gap-4">
               <span className="text-foreground/80 tabular-nums flex items-center gap-1">
                 <Trophy className="w-3 h-3" />
-                {formatCompact(Number(formatEther(market.balance)), { prefix: '' })} Vol
+                {formatCompact(Number(formatUnits(market.totalPot, USDC.decimals)), { prefix: '$' })} Vol
               </span>
               <span className="text-muted-foreground tabular-nums hidden sm:flex items-center gap-1">
                 <Droplets className="w-3 h-3" />
-                {formatCompact(Number(formatEther(market.liquidity)), { prefix: '' })} Liq
+                {formatCompact(Number(formatUnits(market.totalPot, USDC.decimals)), { prefix: '$' })} Pool
               </span>
             </div>
 

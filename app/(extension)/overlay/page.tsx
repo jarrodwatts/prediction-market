@@ -4,26 +4,27 @@
  * Twitch Video Overlay - Betting UI
  * 
  * Overlay panel for placing bets on prediction markets using USDC.
- * Mirrors the TradePanel buy flow with quick preset amounts.
- * 
- * Add ?mock=true to test locally with mock data
+ * Refactored to use TanStack Query for polling and cleaner patterns.
  */
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
 import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useSendCalls, useCallsStatus } from 'wagmi'
-import { parseUnits, formatUnits, encodeFunctionData } from 'viem'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { formatUnits, encodeFunctionData } from 'viem'
 import { useTwitchExtension } from '@/lib/use-twitch-extension'
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from '@/lib/contract'
 import { calcBuyAmount, getPrice } from '@/lib/market-math'
 import { getOutcomeColor, getOutcomeClasses } from '@/lib/outcome-colors'
 import { cn } from '@/lib/utils'
+import { queryKeys } from '@/lib/query-keys'
+import { USDC, ERC20_ABI, parseUSDC } from '@/lib/tokens'
+import { useCountdown, formatCountdown } from '@/lib/hooks/use-countdown'
+import { useUsdcBalance } from '@/lib/hooks/use-usdc-balance'
+import { INTERVALS, TRADING } from '@/lib/constants'
+import type { MarketApiResponse } from '@/lib/types'
 import { CheckCircle, Clock, DollarSign, Loader2, Lock, Trophy, Wallet } from 'lucide-react'
-
-// USDC configuration
-const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`
-const USDC_DECIMALS = 6
 
 // API Base URL for fetching market data
 const getApiBaseUrl = () => {
@@ -31,51 +32,6 @@ const getApiBaseUrl = () => {
     return ''
   }
   return process.env.NEXT_PUBLIC_APP_URL || ''
-}
-
-// ERC20 ABI for approval and balance
-const ERC20_ABI = [
-  {
-    type: 'function',
-    name: 'approve',
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ type: 'bool' }],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'allowance',
-    inputs: [
-      { name: 'owner', type: 'address' },
-      { name: 'spender', type: 'address' },
-    ],
-    outputs: [{ type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'balanceOf',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ type: 'uint256' }],
-    stateMutability: 'view',
-  },
-] as const
-
-interface MarketApiResponse {
-  id: string
-  twitchPredictionId: string
-  question: string
-  outcomes: string[]
-  prices: number[]
-  state: string
-  closesAt: number
-  liquidity: string
-  balance: string
-  resolvedOutcome?: number | null
-  isVoided?: boolean
 }
 
 // Mock market data for local testing (use ?mock=true)
@@ -86,36 +42,17 @@ function getMockMarket(): MarketApiResponse {
     question: 'Will I beat this boss on the first try?',
     outcomes: ['Yes', 'No'],
     prices: [0.65, 0.35],
+    pools: ['650000000000000000000', '350000000000000000000'],
     state: 'open',
-    closesAt: Math.floor(Date.now() / 1000) + 300,
-    liquidity: '1000000000',
-    balance: '500000000',
+    closesAt: Math.floor(Date.now() / 1_000) + 300,
+    totalPot: '1000000000000000000000',
+    protocolFeeBps: 100,
+    creatorFeeBps: 100,
   }
 }
 
-function formatUSDC(value: bigint): string {
-  return formatUnits(value, USDC_DECIMALS)
-}
-
-function parseUSDC(value: string): bigint {
-  return parseUnits(value, USDC_DECIMALS)
-}
-
-function formatCountdown(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds))
-  if (s >= 60 * 60) {
-    const hours = Math.floor(s / 3600)
-    const minutes = Math.floor((s % 3600) / 60)
-    const seconds = s % 60
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-  }
-  const minutes = Math.floor(s / 60)
-  const seconds = s % 60
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
-}
-
-// Quick bet amounts
-const BET_AMOUNTS = [1, 5, 10, 25]
+// Quick bet amounts from centralized constants
+const BET_AMOUNTS = TRADING.BET_AMOUNTS
 
 export default function OverlayPage() {
   const searchParams = useSearchParams()
@@ -125,12 +62,7 @@ export default function OverlayPage() {
   
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
   const [amount, setAmount] = useState('')
-  const [market, setMarket] = useState<MarketApiResponse | null>(isMockMode ? getMockMarket() : null)
-  const [isLoadingMarket, setIsLoadingMarket] = useState(!isMockMode)
-  const [marketError, setMarketError] = useState<string | null>(null)
-  const [isPending, setIsPending] = useState(false)
   const [txSuccess, setTxSuccess] = useState(false)
-  const [isClaimTx, setIsClaimTx] = useState(false)
   const [hasClaimed, setHasClaimed] = useState(false)
 
   // Twitch extension context
@@ -142,13 +74,14 @@ export default function OverlayPage() {
   const { login } = useLoginWithAbstract()
   const { isLoading: isWalletLoading } = useAbstractClient()
   const { address, isConnected } = useAccount()
+  const queryClient = useQueryClient()
 
   // Contract interactions
-  const { writeContract, data: hash, isPending: isWritePending } = useWriteContract()
+  const { writeContract, data: hash, isPending: isWritePending, reset: resetWrite } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
   
   // Batched calls for approve + buy
-  const { sendCalls, data: batchCallsData, isPending: isBatchPending } = useSendCalls()
+  const { sendCalls, data: batchCallsData, isPending: isBatchPending, reset: resetBatch } = useSendCalls()
   const batchId = typeof batchCallsData === 'string' ? batchCallsData : batchCallsData?.id
   const { data: batchStatus } = useCallsStatus({
     id: batchId!,
@@ -157,70 +90,70 @@ export default function OverlayPage() {
       refetchInterval: (query) => {
         const status = query.state.data?.status
         if (status === 'success' || status === 'failure') return false
-        return 1000
+        return 1_000
       },
     },
   })
   const isBatchSuccess = batchStatus?.status === 'success'
 
-  // USDC Balance
-  const { data: usdcBalance, refetch: refetchBalance } = useReadContract({
-    address: USDC_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: 'balanceOf',
-    args: [address!],
-    query: { enabled: isConnected && !!address },
+  // Track handled transactions
+  const handledHashRef = useRef<string | null>(null)
+  const handledBatchIdRef = useRef<string | null>(null)
+  const isClaimTxRef = useRef(false)
+
+  // Fetch active market using useQuery - replaces manual setInterval polling
+  const { data: market, isLoading: isLoadingMarket } = useQuery({
+    queryKey: queryKeys.markets.active(effectiveChannelId || ''),
+    queryFn: async () => {
+      if (isMockMode) return getMockMarket()
+      if (!effectiveChannelId) return null
+      
+      const res = await fetch(`${getApiBaseUrl()}/api/markets/active?channelId=${effectiveChannelId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      
+      if (res.status === 404) return null
+      if (!res.ok) throw new Error('Failed to fetch market')
+      
+      return res.json() as Promise<MarketApiResponse>
+    },
+    enabled: effectiveIsReady && !!effectiveChannelId,
+    refetchInterval: INTERVALS.OVERLAY_POLL,
   })
 
-  // USDC Allowance
-  const { data: usdcAllowance, refetch: refetchAllowance } = useReadContract({
-    address: USDC_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: 'allowance',
-    args: [address!, PREDICTION_MARKET_ADDRESS],
-    query: { enabled: isConnected && !!address },
-  })
+  // USDC Balance and Allowance - using centralized hook
+  const { balance: usdcBalance, allowance: usdcAllowance, balanceFormatted } = useUsdcBalance()
 
-  // Get market shares for price calculation
-  const { data: shares, refetch: refetchShares } = useReadContract({
+  // Get market pools
+  const { data: pools } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'getMarketShares',
+    functionName: 'getMarketPools',
     args: [BigInt(market?.id || '0')],
     query: { enabled: !!market?.id },
   })
 
-  // Get fees
-  const { data: fees } = useReadContract({
-    address: PREDICTION_MARKET_ADDRESS,
-    abi: PREDICTION_MARKET_ABI,
-    functionName: 'getMarketFees',
-    args: [BigInt(market?.id || '0')],
-    query: { enabled: !!market?.id },
-  })
-
-  // Get user's shares for this market
+  // Get user's shares
   const { data: userShares } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'getUserMarketShares',
+    functionName: 'getUserShares',
     args: [BigInt(market?.id || '0'), address!],
     query: { enabled: !!market?.id && isConnected && !!address },
   })
 
-  // Calculate prices from on-chain data
-  const outcomeShares = shares ? shares[1] : []
-  const liquidity = shares ? shares[0] : 0n
-  const buyFee = fees ? (fees[0].fee + fees[0].treasuryFee + fees[0].distributorFee) : 0n
+  const outcomeShares = pools ?? []
+  // Fee from API response (in basis points)
+  const totalFeeBps = BigInt((market?.protocolFeeBps ?? 0) + (market?.creatorFeeBps ?? 0))
 
   const outcomePrices = useMemo(() => {
-    if (!outcomeShares.length || !liquidity || !market) {
+    if (!outcomeShares.length || !market) {
       return market?.prices || [0.5, 0.5]
     }
     return Array.from({ length: market.outcomes.length }).map((_, i) => 
-      getPrice(i, [...outcomeShares], liquidity)
+      getPrice(i, [...outcomeShares])
     )
-  }, [market, outcomeShares, liquidity])
+  }, [market, outcomeShares])
 
   // Parse the amount input
   const amountValue = useMemo(() => {
@@ -228,18 +161,18 @@ export default function OverlayPage() {
     return isNaN(parsed) || parsed <= 0 ? 0 : parsed
   }, [amount])
 
-  // Calculate estimated shares for bet
+  // Calculate estimated payout
   const estimatedShares = useMemo(() => {
     if (!amountValue || selectedOutcome === null || !outcomeShares.length) return 0n
     try {
       const scaledAmount = parseUSDC(amountValue.toString()) * BigInt(10 ** 12)
-      return calcBuyAmount(scaledAmount, selectedOutcome, [...outcomeShares], buyFee)
+      return calcBuyAmount(scaledAmount, selectedOutcome, [...outcomeShares], totalFeeBps)
     } catch {
       return 0n
     }
-  }, [amountValue, selectedOutcome, outcomeShares, buyFee])
+  }, [amountValue, selectedOutcome, outcomeShares, totalFeeBps])
 
-  // Check if approval needed
+  // Check if approval needed - derived state
   const needsApproval = useMemo(() => {
     if (!amountValue) return false
     if (usdcAllowance === undefined) return true
@@ -250,104 +183,59 @@ export default function OverlayPage() {
     }
   }, [amountValue, usdcAllowance])
 
-  // Fetch active market for this channel
-  useEffect(() => {
-    if (isMockMode) {
-      setIsLoadingMarket(false)
-      return
+  // Invalidate queries and reset state after success
+  const handleTxSuccess = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.markets.active(effectiveChannelId || '') })
+    setTxSuccess(true)
+    setAmount('')
+    setSelectedOutcome(null)
+    
+    if (isClaimTxRef.current) {
+      setHasClaimed(true)
+      isClaimTxRef.current = false
+      if (effectiveChannelId) {
+        fetch(`${getApiBaseUrl()}/api/admin/clear-prediction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channelId: effectiveChannelId }),
+        }).catch(console.error)
+      }
+    } else {
+      setTimeout(() => setTxSuccess(false), 3_000)
     }
     
-    if (!effectiveIsReady || !effectiveChannelId) return
+    resetWrite()
+    resetBatch()
+  }, [queryClient, effectiveChannelId, resetWrite, resetBatch])
 
-    const fetchMarket = async () => {
-      try {
-        setIsLoadingMarket(true)
-        const res = await fetch(`${getApiBaseUrl()}/api/markets/active?channelId=${effectiveChannelId}`, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-        })
-        
-        if (res.status === 404) {
-          setMarket(null)
-          setMarketError(null)
-          return
-        }
-        
-        if (!res.ok) throw new Error('Failed to fetch market')
-        
-        const data = await res.json()
-        setMarket(data)
-        setMarketError(null)
-      } catch (err) {
-        setMarketError('Failed to load market')
-        console.error('Error fetching market:', err)
-      } finally {
-        setIsLoadingMarket(false)
-      }
-    }
-
-    fetchMarket()
-    const interval = setInterval(fetchMarket, 2000)
-    return () => clearInterval(interval)
-  }, [isMockMode, effectiveIsReady, effectiveChannelId, token])
-
-  // Handle transaction success
-  const handledHashRef = useRef<string | null>(null)
-  const handledBatchIdRef = useRef<string | null>(null)
-
+  // Handle single transaction success
   useEffect(() => {
     if (isSuccess && hash && hash !== handledHashRef.current) {
       handledHashRef.current = hash
-      setTxSuccess(true)
-      setIsPending(false)
-      setAmount('')
-      setSelectedOutcome(null)
-      refetchBalance()
-      refetchAllowance()
-      refetchShares()
-      
-      if (isClaimTx) {
-        setHasClaimed(true)
-        setIsClaimTx(false)
-        if (effectiveChannelId) {
-          fetch(`${getApiBaseUrl()}/api/admin/clear-prediction`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channelId: effectiveChannelId }),
-          }).catch(console.error)
-        }
-      } else {
-        setTimeout(() => setTxSuccess(false), 3000)
-      }
+      handleTxSuccess()
     }
-  }, [isSuccess, hash, refetchBalance, refetchAllowance, refetchShares, isClaimTx, effectiveChannelId])
+  }, [isSuccess, hash, handleTxSuccess])
 
+  // Handle batch transaction success
   useEffect(() => {
     if (isBatchSuccess && batchId && batchId !== handledBatchIdRef.current) {
       handledBatchIdRef.current = batchId
-      setTxSuccess(true)
-      setIsPending(false)
-      setAmount('')
-      setSelectedOutcome(null)
-      refetchBalance()
-      refetchAllowance()
-      refetchShares()
-      setTimeout(() => setTxSuccess(false), 3000)
+      handleTxSuccess()
     }
-  }, [isBatchSuccess, batchId, refetchBalance, refetchAllowance, refetchShares])
+  }, [isBatchSuccess, batchId, handleTxSuccess])
 
-  const handleBuy = () => {
-    if (!amountValue || selectedOutcome === null || !market) return
-    
-    setIsPending(true)
+  const handleBuy = useCallback(() => {
+    if (!amountValue || selectedOutcome === null || !market || !market.id) return
     
     try {
       const amountBigInt = parseUSDC(amountValue.toString())
+      const marketId = BigInt(market.id)
       
       if (needsApproval) {
         sendCalls({
           calls: [
             {
-              to: USDC_ADDRESS,
+              to: USDC.address,
               data: encodeFunctionData({
                 abi: ERC20_ABI,
                 functionName: 'approve',
@@ -358,8 +246,8 @@ export default function OverlayPage() {
               to: PREDICTION_MARKET_ADDRESS,
               data: encodeFunctionData({
                 abi: PREDICTION_MARKET_ABI,
-                functionName: 'buy',
-                args: [BigInt(market.id), BigInt(selectedOutcome), 0n, amountBigInt],
+                functionName: 'bet',
+                args: [marketId, BigInt(selectedOutcome), amountBigInt],
               }),
             },
           ],
@@ -368,48 +256,65 @@ export default function OverlayPage() {
         writeContract({
           address: PREDICTION_MARKET_ADDRESS,
           abi: PREDICTION_MARKET_ABI,
-          functionName: 'buy',
-          args: [BigInt(market.id), BigInt(selectedOutcome), 0n, amountBigInt],
+          functionName: 'bet',
+          args: [marketId, BigInt(selectedOutcome), amountBigInt],
         })
       }
     } catch (e) {
       console.error('Error placing bet:', e)
-      setIsPending(false)
     }
-  }
+  }, [amountValue, selectedOutcome, market, needsApproval, sendCalls, writeContract])
+
+  const handleClaimWinnings = useCallback(() => {
+    if (!market?.id) return
+    isClaimTxRef.current = true
+    writeContract({
+      address: PREDICTION_MARKET_ADDRESS,
+      abi: PREDICTION_MARKET_ABI,
+      functionName: 'claimWinnings',
+      args: [BigInt(market.id)]
+    })
+  }, [market?.id, writeContract])
+
+  const handleClaimVoided = useCallback(() => {
+    if (!market?.id || !userShares) return
+    isClaimTxRef.current = true
+    const userOutcomeShares = userShares as readonly bigint[]
+    
+    // Find first outcome with shares to claim refund
+    for (let i = 0; i < userOutcomeShares.length; i++) {
+      if (userOutcomeShares[i] > 0n) {
+        writeContract({
+          address: PREDICTION_MARKET_ADDRESS,
+          abi: PREDICTION_MARKET_ABI,
+          functionName: 'claimRefund',
+          args: [BigInt(market.id), BigInt(i)]
+        })
+        break
+      }
+    }
+  }, [market?.id, userShares, writeContract])
 
   // Handle quick amount button click
-  const handleQuickAmount = (amt: number) => {
-    setAmount(amt.toString())
-  }
+  const handleQuickAmount = (amt: number) => setAmount(amt.toString())
 
   // Handle percentage of balance click
   const handlePercentage = (pct: number) => {
     if (!usdcBalance) return
-    const bal = Number(formatUSDC(usdcBalance))
+    const bal = balanceFormatted
     const newAmount = Math.floor(bal * pct * 100) / 100
     setAmount(newAmount.toString())
   }
 
-  // Update "now" every second so countdown ticks in real time
-  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000))
-  useEffect(() => {
-    const interval = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000)
-    return () => clearInterval(interval)
-  }, [])
+  // Countdown timer
+  const remainingSeconds = useCountdown(market?.closesAt ?? null)
+  const timeRemaining = !market?.closesAt ? null : remainingSeconds <= 0 ? 'Closed' : formatCountdown(remainingSeconds)
 
-  const timeRemaining = useMemo(() => {
-    if (!market?.closesAt) return null
-    const remaining = market.closesAt - nowSec
-    if (remaining <= 0) return 'Closed'
-    return formatCountdown(remaining)
-  }, [market?.closesAt, nowSec])
-
-  const isLoading = isWritePending || isBatchPending || isConfirming || isPending
+  const isLoading = isWritePending || isBatchPending || isConfirming
   
   // Check market state
-  const isTimePassed = market?.closesAt ? nowSec > market.closesAt : false
-  const isMarketClosed = market?.state === 'closed' || (market?.state === 'open' && isTimePassed)
+  const isTimePassed = remainingSeconds <= 0
+  const isMarketClosed = market?.state === 'locked' || (market?.state === 'open' && isTimePassed)
   const isMarketResolved = market?.state === 'resolved'
   const isMarketPending = market?.state === 'pending'
 
@@ -419,7 +324,12 @@ export default function OverlayPage() {
   const potentialReturn = estShares
   const potentialReturnPct = amountValue > 0 ? ((potentialReturn / amountValue - 1) * 100) : 0
 
-  // Common panel wrapper - fills the Video Component iframe
+  const getUserOutcomeShares = (): readonly bigint[] | undefined => {
+    if (!userShares) return undefined
+    return userShares as readonly bigint[]
+  }
+
+  // Common panel wrapper
   const PanelWrapper = ({ children }: { children: React.ReactNode }) => (
     <div className="h-full w-full overflow-auto bg-card">
       <div className="min-h-full">
@@ -427,6 +337,15 @@ export default function OverlayPage() {
       </div>
     </div>
   )
+
+  // Loading state
+  if (isLoadingMarket && !isMockMode) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-card p-4">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   // No market state
   if (!market) {
@@ -520,28 +439,10 @@ export default function OverlayPage() {
     )
   }
 
-  // Market resolved state (includes voided)
+  // Market resolved state
   if (isMarketResolved) {
-    // Market is voided if API says so, OR if resolved but no valid winning outcome
     const isVoided = market.isVoided === true || (market.resolvedOutcome === null || market.resolvedOutcome === undefined)
-    // userShares returns: { liquidity: bigint, outcomes: bigint[] } or [bigint, bigint[]]
-    // Handle both named property access and array index access
-    const getUserOutcomeShares = (): readonly bigint[] | undefined => {
-      if (!userShares) return undefined
-      // Check for named property first (wagmi with named ABI outputs)
-      if ('outcomes' in userShares && Array.isArray(userShares.outcomes)) {
-        return userShares.outcomes as readonly bigint[]
-      }
-      // Fallback to array index access
-      if (Array.isArray(userShares[1])) {
-        return userShares[1] as readonly bigint[]
-      }
-      return undefined
-    }
     const userOutcomeShares = getUserOutcomeShares()
-    
-    // For voided markets, users can reclaim all their shares
-    // For resolved markets, only the winning outcome shares matter
     const totalUserShares = userOutcomeShares 
       ? userOutcomeShares.reduce((sum: bigint, s: bigint) => sum + s, 0n) 
       : 0n
@@ -552,38 +453,6 @@ export default function OverlayPage() {
     const winnerColor = getOutcomeColor(winningOutcome, winningOutcomeIndex)
     const winningSharesRaw = userOutcomeShares?.[winningOutcomeIndex] ?? 0n
     const hasWinningShares = winningSharesRaw > 0n
-
-    const handleClaimWinnings = () => {
-      if (!market?.id) return
-      setIsPending(true)
-      setIsClaimTx(true)
-      writeContract({
-        address: PREDICTION_MARKET_ADDRESS,
-        abi: PREDICTION_MARKET_ABI,
-        functionName: 'claimWinnings',
-        args: [BigInt(market.id)]
-      })
-    }
-
-    // For voided markets, claim each outcome separately
-    const handleClaimVoided = async () => {
-      if (!market?.id || !userOutcomeShares) return
-      setIsPending(true)
-      setIsClaimTx(true)
-      
-      // Find first outcome with shares to claim
-      for (let i = 0; i < userOutcomeShares.length; i++) {
-        if (userOutcomeShares[i] > 0n) {
-          writeContract({
-            address: PREDICTION_MARKET_ADDRESS,
-            abi: PREDICTION_MARKET_ABI,
-            functionName: 'claimVoidedOutcomeShares',
-            args: [BigInt(market.id), BigInt(i)]
-          })
-          break
-        }
-      }
-    }
 
     // Voided market UI
     if (isVoided) {
@@ -748,7 +617,7 @@ export default function OverlayPage() {
                 <label className="text-sm text-muted-foreground">Amount (USDC)</label>
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Wallet className="h-3 w-3" />
-                  Balance: {usdcBalance !== undefined ? Number(formatUSDC(usdcBalance)).toFixed(2) : '0'} USDC
+                  Balance: {balanceFormatted.toFixed(2)} USDC
                 </span>
               </div>
               
@@ -809,27 +678,23 @@ export default function OverlayPage() {
               {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {isConfirming ? 'Confirming...' : 'Processing...'}
+                  {isConfirming ? 'Confirming...' : 'Placing bet...'}
                 </>
               ) : txSuccess ? (
                 'Bet Placed!'
               ) : (
-                'Buy'
+                'Place Bet'
               )}
             </button>
 
             {/* Order Summary */}
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between text-muted-foreground">
-                <span>Price per share</span>
-                <span className="text-foreground">${pricePerShare.toFixed(4)}</span>
+                <span>Current odds</span>
+                <span className="text-foreground">{(pricePerShare * 100).toFixed(1)}%</span>
               </div>
               <div className="flex justify-between text-muted-foreground">
-                <span>Est. Shares</span>
-                <span className="text-foreground">{estShares.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-muted-foreground">
-                <span>Payout if win</span>
+                <span>Est. payout if win</span>
                 <span className={cn("font-medium", potentialReturnPct >= 0 ? "text-emerald-500" : "text-rose-500")}>
                   ${potentialReturn.toFixed(2)} ({potentialReturnPct >= 0 ? '+' : ''}{potentialReturnPct.toFixed(0)}%)
                 </span>

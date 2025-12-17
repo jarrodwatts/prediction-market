@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/middleware/auth'
+import { validateBody } from '@/lib/middleware/validation'
+import { updateSubscriptionsSchema } from '@/lib/validation/schemas'
 
 const TWITCH_API_URL = 'https://api.twitch.tv/helix/eventsub/subscriptions'
 const TWITCH_TOKEN_URL = 'https://id.twitch.tv/oauth2/token'
@@ -23,11 +26,18 @@ async function getAppAccessToken(): Promise<string> {
 
 export async function POST(request: NextRequest) {
   try {
-    const { channelId, webhookUrl } = await request.json()
-    
-    if (!channelId || !webhookUrl) {
-      return NextResponse.json({ error: 'channelId and webhookUrl required' }, { status: 400 })
-    }
+    // Verify admin authorization
+    const { error: authError } = await requireAdmin(request)
+    if (authError) return authError
+
+    // Validate request body
+    const { data: body, error: validationError } = await validateBody(
+      request,
+      updateSubscriptionsSchema
+    )
+    if (validationError) return validationError
+
+    const { channelId, webhookUrl } = body
 
     const appToken = await getAppAccessToken()
     const clientId = process.env.TWITCH_CLIENT_ID!

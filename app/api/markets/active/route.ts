@@ -3,6 +3,11 @@ import { createPublicClient, http } from 'viem'
 import { getActivePrediction, getPredictionData } from '@/lib/kv'
 import { abstractTestnet } from '@/lib/wagmi'
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from '@/lib/contract'
+import { validateSearchParams } from '@/lib/middleware/validation'
+import { marketActiveSchema } from '@/lib/validation/schemas'
+import { getCorsHeaders } from '@/lib/middleware/cors'
+import { checkRateLimit } from '@/lib/rate-limit'
+import { getPrices } from '@/lib/market-math'
 
 // Create public client for reading contract data
 const publicClient = createPublicClient({
@@ -10,30 +15,41 @@ const publicClient = createPublicClient({
   transport: http(),
 })
 
-// CORS headers for Twitch extension
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Cache-Control': 'public, max-age=1, stale-while-revalidate=2', // Short cache for responsiveness
-}
-
 // Handle preflight requests
-export async function OPTIONS() {
+export async function OPTIONS(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  const corsHeaders = {
+    ...getCorsHeaders(origin, 'GET, OPTIONS'),
+    'Cache-Control': 'public, max-age=86400', // Cache preflight for 24h
+  }
   return new NextResponse(null, { status: 204, headers: corsHeaders })
 }
 
 export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const channelId = searchParams.get('channelId')
+  const origin = request.headers.get('origin')
+  const corsHeaders = {
+    ...getCorsHeaders(origin, 'GET, OPTIONS'),
+    'Cache-Control': 'public, max-age=1, stale-while-revalidate=2', // Short cache for responsiveness
+  }
 
-    if (!channelId) {
+  // Rate limit check BEFORE processing request
+  const rateLimitResponse = await checkRateLimit(request, 'public')
+  if (rateLimitResponse) return rateLimitResponse
+
+  try {
+    // Validate query parameters
+    const { data: params, error: validationError } = validateSearchParams(
+      request,
+      marketActiveSchema
+    )
+    if (validationError) {
       return NextResponse.json(
-        { error: 'channelId is required' },
-        { status: 400, headers: corsHeaders }
+        validationError.body,
+        { status: validationError.status, headers: corsHeaders }
       )
     }
+
+    const { channelId } = params
 
     // Get active prediction for this channel
     const activePredictionId = await getActivePrediction(channelId)
@@ -57,17 +73,21 @@ export async function GET(request: NextRequest) {
 
     // If market is still being created on-chain (pending), return immediately with KV data
     if (!predictionData.marketId) {
+      const defaultPrices = predictionData.outcomes.map(() => 1 / predictionData.outcomes.length)
       return NextResponse.json({
         id: null,
         twitchPredictionId: activePredictionId,
         question: predictionData.question,
         outcomes: predictionData.outcomes,
-        prices: predictionData.outcomes.map(() => 0.5), // Default 50/50
+        prices: defaultPrices, // Equal probability before any bets
+        pools: predictionData.outcomes.map(() => '0'),
         state: 'pending', // Special state for UI
         closesAt: predictionData.locksAt,
-        liquidity: '0',
-        balance: '0',
+        totalPot: '0',
         resolvedOutcome: null,
+        isVoided: false,
+        protocolFeeBps: 150, // Default 1.5%
+        creatorFeeBps: 150, // Default 1.5%
       }, { headers: corsHeaders })
     }
 
@@ -76,45 +96,42 @@ export async function GET(request: NextRequest) {
       const marketId = predictionData.marketId! // Non-null (checked above)
       
       // Batch all contract reads in parallel
-      const [marketData, ...priceResults] = await Promise.all([
+      const [marketData, pools] = await Promise.all([
         publicClient.readContract({
           address: PREDICTION_MARKET_ADDRESS,
           abi: PREDICTION_MARKET_ABI,
           functionName: 'getMarketData',
           args: [marketId],
         }),
-        // Fetch prices in parallel
-        ...predictionData.outcomes.map((_, i) =>
-          publicClient.readContract({
-            address: PREDICTION_MARKET_ADDRESS,
-            abi: PREDICTION_MARKET_ABI,
-            functionName: 'getMarketOutcomePrice',
-            args: [marketId, BigInt(i)],
-          }).catch(() => BigInt(5e17)) // Default to 50% on error
-        ),
+        publicClient.readContract({
+          address: PREDICTION_MARKET_ADDRESS,
+          abi: PREDICTION_MARKET_ABI,
+          functionName: 'getMarketPools',
+          args: [marketId],
+        }).catch(() => [] as readonly bigint[]),
       ])
 
-      const [state, closesAt, liquidity, balance, sharesAvailable, resolvedOutcomeId] = marketData as [number, bigint, bigint, bigint, bigint, bigint]
+      // getMarketData returns: state, closesAt, totalPot, outcomeCount, resolvedOutcome, creator, protocolFeeBps, creatorFeeBps
+      const [state, closesAt, totalPot, , resolvedOutcome, , protocolFeeBps, creatorFeeBps] = marketData as [
+        number, bigint, bigint, bigint, bigint, string, number, number
+      ]
 
-      // Convert prices from 18 decimals to percentage
-      const prices = priceResults.map(p => Number(p as bigint) / 1e18)
+      // Calculate prices from pool ratios
+      const prices = pools.length > 0 ? getPrices(pools) : predictionData.outcomes.map(() => 1 / predictionData.outcomes.length)
 
-      // Map contract state to string
-      const stateMap = ['open', 'closed', 'resolved']
+      // Map contract state to string: 0=Open, 1=Locked, 2=Resolved, 3=Voided
+      const stateMap = ['open', 'locked', 'resolved', 'voided']
       let marketState = stateMap[state] || 'unknown'
       
       // Use KV state for faster UI updates (updated immediately when Twitch locks/resolves)
       if (predictionData.state === 'locked' && marketState === 'open') {
-        marketState = 'closed'
+        marketState = 'locked'
       } else if (predictionData.state === 'resolved') {
         marketState = 'resolved'
       }
 
-      // Check if market is voided:
-      // - resolvedOutcomeId is -1 (contract uses int256, returns -1 for voided)
-      // - OR resolvedOutcomeId >= outcomeCount
-      const resolvedId = Number(resolvedOutcomeId)
-      const isVoided = marketState === 'resolved' && (resolvedId < 0 || resolvedId >= predictionData.outcomes.length)
+      // Check if market is voided (state === 3)
+      const isVoided = state === 3
 
       return NextResponse.json({
         id: marketId.toString(),
@@ -122,32 +139,37 @@ export async function GET(request: NextRequest) {
         question: predictionData.question,
         outcomes: predictionData.outcomes,
         prices,
+        pools: pools.map(p => p.toString()),
         state: marketState,
         closesAt: Number(closesAt),
-        liquidity: liquidity.toString(),
-        balance: balance.toString(),
-        resolvedOutcome: marketState === 'resolved' && !isVoided ? Number(resolvedOutcomeId) : null,
+        totalPot: totalPot.toString(),
+        resolvedOutcome: marketState === 'resolved' && !isVoided ? Number(resolvedOutcome) : null,
         isVoided,
+        protocolFeeBps,
+        creatorFeeBps,
       }, { headers: corsHeaders })
     } catch (contractError) {
       console.error('Error reading contract:', contractError)
       
       // Return prediction data without contract info (fast fallback)
-      // If KV says resolved but we can't read contract, assume potentially voided
       const fallbackState = predictionData.state === 'resolved' ? 'resolved' : 
-                            predictionData.state === 'locked' ? 'closed' : 'open'
+                            predictionData.state === 'locked' ? 'locked' : 'open'
+      const defaultPrices = predictionData.outcomes.map(() => 1 / predictionData.outcomes.length)
+      
       return NextResponse.json({
         id: predictionData.marketId?.toString() ?? null,
         twitchPredictionId: activePredictionId,
         question: predictionData.question,
         outcomes: predictionData.outcomes,
-        prices: predictionData.outcomes.map(() => 0.5),
+        prices: defaultPrices,
+        pools: predictionData.outcomes.map(() => '0'),
         state: fallbackState,
         closesAt: predictionData.locksAt,
-        liquidity: '0',
-        balance: '0',
+        totalPot: '0',
         resolvedOutcome: null,
         isVoided: false, // Can't determine without contract data
+        protocolFeeBps: 150,
+        creatorFeeBps: 150,
       }, { headers: corsHeaders })
     }
   } catch (error) {
@@ -158,4 +180,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-

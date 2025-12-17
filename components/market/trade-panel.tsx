@@ -1,102 +1,29 @@
 "use client";
 
-/**
- * Trade Panel Component
- * 
- * Interactive panel for buying and selling outcomes using USDC.
- */
-
-import { useState, useMemo, useEffect, useRef } from "react";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-  TabsContents,
-} from "@/components/animate-ui/components/animate/tabs";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, DollarSign, Wallet, Droplets, Coins, ArrowDownToLine, Lock } from "lucide-react";
-import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useSendCalls, useCallsStatus, usePublicClient } from "wagmi";
-import { useQueryClient } from "@tanstack/react-query";
-import { parseUnits, formatUnits, encodeFunctionData, decodeFunctionData, parseAbiItem } from "viem";
+import { Loader2, DollarSign, Wallet, Coins, Lock, AlertTriangle } from "lucide-react";
+import { useReadContract, useAccount, usePublicClient } from "wagmi";
+import { useQuery } from "@tanstack/react-query";
+import { formatUnits, parseAbiItem } from "viem";
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
-import { abstractTestnet } from "@/lib/wagmi";
-import { calcBuyAmount, calcSellAmount, getPrice } from "@/lib/market-math";
+import { calcBuyAmount, getPrice } from "@/lib/market-math";
 import type { MarketData } from "@/lib/types";
 import { getOutcomeColor, getOutcomeClasses } from "@/lib/outcome-colors";
-import { formatShares } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useTransactionToast } from "@/lib/use-transaction-toast";
-import { useQuery } from "@tanstack/react-query";
-
-// USDC configuration
-const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`;
-const USDC_DECIMALS = 6;
-
-// ERC20 ABI for approval and balance
-const ERC20_ABI = [
-  {
-    type: 'function',
-    name: 'approve',
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ type: 'bool' }],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'allowance',
-    inputs: [
-      { name: 'owner', type: 'address' },
-      { name: 'spender', type: 'address' },
-    ],
-    outputs: [{ type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'balanceOf',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ type: 'uint256' }],
-    stateMutability: 'view',
-  },
-] as const;
+import { useMarketAction } from "@/lib/hooks/use-market-actions";
+import { queryKeys } from "@/lib/query-keys";
+import { USDC, formatUSDC, parseUSDC } from "@/lib/tokens";
+import { useUsdcBalance } from "@/lib/hooks/use-usdc-balance";
+import { DECIMALS, TRADING } from "@/lib/constants";
 
 interface TradePanelProps {
   market: MarketData;
   selectedOutcome: number;
   onOutcomeChange: (outcome: number) => void;
-  /**
-   * When true, renders without its own outer card shell.
-   * Useful for composing into a combined right-rail panel.
-   */
   embedded?: boolean;
-}
-
-type TabType = "buy" | "sell" | "liquidity";
-
-// Helper to format USDC amounts
-function formatUSDC(value: bigint): string {
-  return formatUnits(value, USDC_DECIMALS);
-}
-
-// Helper to parse USDC amounts
-function parseUSDC(value: string): bigint {
-  return parseUnits(value, USDC_DECIMALS);
-}
-
-// Note: Error parsing is now handled by lib/errors.ts
-// We pass the raw error to txToast.showError which parses it for user-friendly display
-
-function toBigIntSafe(v: unknown): bigint {
-  if (typeof v === "bigint") return v;
-  if (typeof v === "number") return BigInt(Math.trunc(v));
-  if (typeof v === "string" && v.trim() !== "") return BigInt(v);
-  return 0n;
 }
 
 export function TradePanel({
@@ -105,536 +32,150 @@ export function TradePanel({
   onOutcomeChange,
   embedded = false,
 }: TradePanelProps) {
-  const [activeTab, setActiveTab] = useState<TabType>("buy");
-  const [liquidityTab, setLiquidityTab] = useState<"add" | "remove">("add");
-  
   const [amount, setAmount] = useState("");
-  const [sharesToSell, setSharesToSell] = useState("");
-  const [liquidityToRemove, setLiquidityToRemove] = useState("");
-  const [needsApproval, setNeedsApproval] = useState(false);
-  const [pendingTxType, setPendingTxType] = useState<"buy" | "sell" | "addLiquidity" | "removeLiquidity" | "claimFees" | "claimLiquidity" | "claimWinnings" | "approve" | null>(null);
   
-  const txToast = useTransactionToast();
-  const handledHashRef = useRef<string | null>(null);
-  const handledBatchIdRef = useRef<string | null>(null);
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
-  const queryClient = useQueryClient();
-  const { writeContract, data: hash, isPending: isWritePending, error: writeError } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
-  
-  // Batched calls for approve + action (AGW feature)
-  const { sendCalls, data: batchCallsData, isPending: isBatchPending, error: batchError } = useSendCalls();
-  const batchId = typeof batchCallsData === 'string' ? batchCallsData : batchCallsData?.id;
-  const { data: batchStatus } = useCallsStatus({
-    id: batchId!,
-    query: { 
-      enabled: !!batchId,
-      // Poll every second until the transaction is confirmed or fails
-      refetchInterval: (query) => {
-        const status = query.state.data?.status;
-        if (status === 'success' || status === 'failure') {
-          return false; // Stop polling
-        }
-        return 1000; // Poll every 1 second
-      },
+
+  const marketAction = useMarketAction(market.id, {
+    onSuccess: () => {
+      setAmount("");
     },
   });
-  const isBatchSuccess = batchStatus?.status === 'success';
-  const isBatchFailed = batchStatus?.status === 'failure';
 
-  // USDC Balance
-  const { data: usdcBalance, refetch: refetchBalance } = useReadContract({
-    address: USDC_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: 'balanceOf',
-    args: [address!],
-    query: {
-      enabled: isConnected && !!address,
-    }
-  });
+  const { balance: usdcBalance, allowance: usdcAllowance, balanceFormatted } = useUsdcBalance();
 
-  // USDC Allowance
-  const { data: usdcAllowance, refetch: refetchAllowance } = useReadContract({
-    address: USDC_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: 'allowance',
-    args: [address!, PREDICTION_MARKET_ADDRESS],
-    query: {
-      enabled: isConnected && !!address,
-    }
-  });
-
-  const { data: shares, refetch: refetchShares } = useReadContract({
+  const { data: pools } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'getMarketShares',
+    functionName: 'getMarketPools',
     args: [market.id],
   });
 
-  const { data: fees } = useReadContract({
+  const { data: userSharesData } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'getMarketFees',
-    args: [market.id],
-  });
-
-  const { data: userShares, refetch: refetchUserShares } = useReadContract({
-    address: PREDICTION_MARKET_ADDRESS,
-    abi: PREDICTION_MARKET_ABI,
-    functionName: 'getUserMarketShares',
+    functionName: 'getUserShares',
     args: [market.id, address!],
     query: {
       enabled: isConnected && !!address,
     }
   });
 
-  const { data: claimableFees, refetch: refetchClaimableFees } = useReadContract({
+  const { data: claimableData } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
-    functionName: 'getUserClaimableFees',
+    functionName: 'getClaimableAmount',
     args: [market.id, address!],
     query: {
       enabled: isConnected && !!address,
     }
   });
 
-  const { data: claimStatus, refetch: refetchClaimStatus } = useReadContract({
-    address: PREDICTION_MARKET_ADDRESS,
-    abi: PREDICTION_MARKET_ABI,
-    functionName: 'getUserClaimStatus',
-    args: [market.id, address!],
-    query: {
-      enabled: isConnected && !!address,
-    }
-  });
-
-  // Check if approval is needed
-  useEffect(() => {
-    if (amount && usdcAllowance !== undefined) {
-      try {
-        const amountBigInt = parseUSDC(amount);
-        setNeedsApproval(usdcAllowance < amountBigInt);
-      } catch {
-        setNeedsApproval(false);
-      }
-    } else {
-      setNeedsApproval(false);
+  const needsApproval = useMemo(() => {
+    if (!amount || usdcAllowance === undefined) return false;
+    try {
+      const amountBigInt = parseUSDC(amount);
+      return usdcAllowance < amountBigInt;
+    } catch {
+      return false;
     }
   }, [amount, usdcAllowance]);
 
-  // Effect to handle transaction success (single tx)
-  useEffect(() => {
-    if (isSuccess && hash && hash !== handledHashRef.current) {
-        handledHashRef.current = hash;
-        
-        // Show success toast
-        if (pendingTxType) {
-          txToast.showSuccess(pendingTxType);
-          setPendingTxType(null);
-        }
-        
-        setAmount("");
-        setSharesToSell("");
-        setLiquidityToRemove("");
-        // Invalidate queries to refresh data
-        queryClient.invalidateQueries({ queryKey: ['market-history'] });
-        queryClient.invalidateQueries({ queryKey: ['markets-logs'] });
-        refetchShares();
-        refetchUserShares();
-        refetchClaimableFees();
-        refetchClaimStatus();
-        refetchBalance();
-        refetchAllowance();
-    }
-  }, [isSuccess, hash, queryClient, refetchShares, refetchUserShares, refetchClaimableFees, refetchClaimStatus, refetchBalance, refetchAllowance, pendingTxType, txToast]);
-
-  // Effect to handle batched transaction success
-  useEffect(() => {
-    if (isBatchSuccess && batchId && batchId !== handledBatchIdRef.current) {
-        handledBatchIdRef.current = batchId;
-        
-        // Show success toast
-        if (pendingTxType) {
-          txToast.showSuccess(pendingTxType);
-          setPendingTxType(null);
-        }
-        
-        setAmount("");
-        setSharesToSell("");
-        setLiquidityToRemove("");
-        // Invalidate queries to refresh data
-        queryClient.invalidateQueries({ queryKey: ['market-history'] });
-        queryClient.invalidateQueries({ queryKey: ['markets-logs'] });
-        refetchShares();
-        refetchUserShares();
-        refetchClaimableFees();
-        refetchClaimStatus();
-        refetchBalance();
-        refetchAllowance();
-    }
-  }, [isBatchSuccess, batchId, queryClient, refetchShares, refetchUserShares, refetchClaimableFees, refetchClaimStatus, refetchBalance, refetchAllowance, pendingTxType, txToast]);
-
-  // Track errors we've already shown toasts for
-  const handledWriteErrorRef = useRef<Error | null>(null);
-  const handledBatchErrorRef = useRef<Error | null>(null);
-
-  useEffect(() => {
-      if (writeError && writeError !== handledWriteErrorRef.current) {
-          handledWriteErrorRef.current = writeError;
-          if (pendingTxType) {
-            txToast.showError(pendingTxType, writeError);
-            setPendingTxType(null);
-          }
-      }
-  }, [writeError, pendingTxType, txToast]);
-
-  useEffect(() => {
-      if (batchError && batchError !== handledBatchErrorRef.current) {
-          handledBatchErrorRef.current = batchError;
-          if (pendingTxType) {
-            txToast.showError(pendingTxType, batchError);
-            setPendingTxType(null);
-          }
-      }
-  }, [batchError, pendingTxType, txToast]);
-
-  // Track batch failures we've already handled
-  const handledBatchFailureRef = useRef<string | null>(null);
-  
-  // Effect to handle batched transaction failure (from status polling)
-  useEffect(() => {
-    if (isBatchFailed && batchId && batchId !== handledBatchFailureRef.current) {
-        handledBatchFailureRef.current = batchId;
-        if (pendingTxType) {
-          txToast.showError(pendingTxType, "Transaction failed on chain");
-          setPendingTxType(null);
-        }
-    }
-  }, [isBatchFailed, batchId, pendingTxType, txToast]);
-
-  const outcomeShares = shares ? shares[1] : [];
-  const buyFee = fees ? (fees[0].fee + fees[0].treasuryFee + fees[0].distributorFee) : 0n;
-  const sellFee = fees ? (fees[1].fee + fees[1].treasuryFee + fees[1].distributorFee) : 0n;
-  const liquidity = shares ? shares[0] : 0n;
-  
-  // User's shares for each outcome
-  // userShares returns: { liquidity: bigint, outcomes: bigint[] } or [bigint, bigint[]]
-  const userOutcomeShares = userShares 
-    ? (Array.isArray(userShares[1]) ? userShares[1] : []) 
-    : [];
-  const userSelectedOutcomeShares = userOutcomeShares[selectedOutcome] ?? 0n;
-  
-  // User's liquidity position
-  const userLiquidity = userShares ? (userShares[0] ?? 0n) : 0n;
-  const userClaimableFees = claimableFees ?? 0n;
-
-  // Check if user has any position across all outcomes
-  const hasAnyPosition = userOutcomeShares.some(s => s > 0n);
-  // Get indices of outcomes where user has a position
+  const outcomeShares = pools ?? [];
+  const totalFeeBps = BigInt(market.protocolFeeBps + market.creatorFeeBps);
+  const userOutcomeShares = userSharesData ?? [];
+  const hasAnyPosition = userOutcomeShares.some((s: bigint) => s > 0n);
   const positionIndices = userOutcomeShares
-    .map((shares, idx) => ({ shares, idx }))
-    .filter(({ shares }) => shares > 0n);
-  
-  // Claim status flags
-  const canClaimLiquidity = claimStatus ? claimStatus[2] && !claimStatus[3] : false;
+    .map((shares: bigint, idx: number) => ({ shares, idx }))
+    .filter(({ shares }: { shares: bigint }) => shares > 0n);
 
-  // --- Calculations ---
-  // Note: Market math uses 18 decimals internally, we need to scale USDC (6 decimals) up
-  const simulatedBuyShares = useMemo(() => {
+  const claimableAmount = claimableData ? claimableData[0] : 0n;
+  const canClaim = claimableData ? claimableData[1] : false;
+
+  const simulatedPayout = useMemo(() => {
     if (!outcomeShares.length || !amount) return 0n;
     try {
-        const val = parseUSDC(amount);
-        if (val === 0n) return 0n;
-        // Scale up to 18 decimals for market math
-        const scaledVal = val * BigInt(10 ** 12);
-        return calcBuyAmount(scaledVal, selectedOutcome, [...outcomeShares], buyFee);
-    } catch (e) {
-        return 0n;
+      const val = parseUSDC(amount);
+      if (val === 0n) return 0n;
+      const scaledVal = val * BigInt(10 ** 12);
+      return calcBuyAmount(scaledVal, selectedOutcome, [...outcomeShares], totalFeeBps);
+    } catch {
+      return 0n;
     }
-  }, [amount, selectedOutcome, outcomeShares, buyFee]);
+  }, [amount, selectedOutcome, outcomeShares, totalFeeBps]);
 
-  // Calculate current prices for all outcomes
   const outcomePrices = useMemo(() => {
-      if (!outcomeShares.length || !liquidity) return Array(market.outcomeCount).fill(0);
-      return Array.from({ length: market.outcomeCount }).map((_, i) => 
-          getPrice(i, [...outcomeShares], liquidity)
-      );
-  }, [market.outcomeCount, outcomeShares, liquidity]);
+    if (!outcomeShares.length) return Array(market.outcomeCount).fill(0);
+    return Array.from({ length: market.outcomeCount }).map((_, i) => 
+      getPrice(i, [...outcomeShares])
+    );
+  }, [market.outcomeCount, outcomeShares]);
 
-  // Check if prices are actually loaded (not just defaults)
-  const pricesLoaded = outcomeShares.length > 0 && liquidity > 0n;
+  const pricesLoaded = outcomeShares.length > 0;
 
-  // --- Handlers ---
-  const handleApprove = () => {
-    setPendingTxType("approve");
-    txToast.showPending("approve");
-    try {
-      // Approve max uint256 for convenience
-      writeContract({
-        address: USDC_ADDRESS,
-        abi: ERC20_ABI,
-        functionName: 'approve',
-        args: [PREDICTION_MARKET_ADDRESS, BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")]
-      });
-    } catch (e: unknown) {
-      txToast.showError("approve", e);
-      setPendingTxType(null);
-    }
-  };
-
-  const handleBuy = () => {
-      if (!amount) return;
-      
-      setPendingTxType("buy");
-      txToast.showPending("buy", `Buying ${outcomeTitles[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`} shares for $${amount}`);
-      
-      try {
-          const amountBigInt = parseUSDC(amount);
-          
-          if (needsApproval) {
-            // Batch approve + buy in a single transaction (AGW feature)
-            sendCalls({
-              calls: [
-                {
-                  to: USDC_ADDRESS,
-                  data: encodeFunctionData({
-                    abi: ERC20_ABI,
-                    functionName: 'approve',
-                    args: [PREDICTION_MARKET_ADDRESS, amountBigInt],
-                  }),
-                },
-                {
-                  to: PREDICTION_MARKET_ADDRESS,
-                  data: encodeFunctionData({
-                    abi: PREDICTION_MARKET_ABI,
-                    functionName: 'buy',
-                    args: [market.id, BigInt(selectedOutcome), 0n, amountBigInt],
-                  }),
-                },
-              ],
-            });
-          } else {
-            writeContract({
-                address: PREDICTION_MARKET_ADDRESS,
-                abi: PREDICTION_MARKET_ABI,
-                functionName: 'buy',
-                args: [market.id, BigInt(selectedOutcome), 0n, amountBigInt]
-            });
-          }
-      } catch (e: unknown) {
-          txToast.showError("buy", e);
-          setPendingTxType(null);
-      }
-  };
-
-  const handleSell = () => {
-      if (!sharesToSell) return;
-      
-      setPendingTxType("sell");
-      txToast.showPending("sell", `Selling ${sharesToSell} ${outcomeTitles[selectedOutcome] ?? `Outcome ${selectedOutcome + 1}`} shares`);
-      
-      try {
-           // Shares are in 18 decimals
-           const sharesAmount = parseUnits(sharesToSell, 18);
-           writeContract({
-               address: PREDICTION_MARKET_ADDRESS,
-               abi: PREDICTION_MARKET_ABI,
-               functionName: 'sell',
-               args: [market.id, BigInt(selectedOutcome), sharesAmount, BigInt("999999999999999999999999")]
-           });
-      } catch (e: unknown) {
-          txToast.showError("sell", e);
-          setPendingTxType(null);
-      }
-  };
-
-  const handleAddLiquidity = () => {
-      if (!amount) return;
-      
-      setPendingTxType("addLiquidity");
-      txToast.showPending("addLiquidity", `Adding $${amount} to liquidity pool`);
-      
-      try {
-          const amountBigInt = parseUSDC(amount);
-          
-          if (needsApproval) {
-            // Batch approve + addLiquidity in a single transaction (AGW feature)
-            sendCalls({
-              calls: [
-                {
-                  to: USDC_ADDRESS,
-                  data: encodeFunctionData({
-                    abi: ERC20_ABI,
-                    functionName: 'approve',
-                    args: [PREDICTION_MARKET_ADDRESS, amountBigInt],
-                  }),
-                },
-                {
-                  to: PREDICTION_MARKET_ADDRESS,
-                  data: encodeFunctionData({
-                    abi: PREDICTION_MARKET_ABI,
-                    functionName: 'addLiquidity',
-                    args: [market.id, amountBigInt],
-                  }),
-                },
-              ],
-            });
-          } else {
-            writeContract({
-                address: PREDICTION_MARKET_ADDRESS,
-                abi: PREDICTION_MARKET_ABI,
-                functionName: 'addLiquidity',
-                args: [market.id, amountBigInt]
-            });
-          }
-      } catch (e: unknown) {
-          txToast.showError("addLiquidity", e);
-          setPendingTxType(null);
-      }
-  };
-
-  const handlePercentageClick = (percentage: number) => {
-    if (usdcBalance) {
-        const value = Number(formatUSDC(usdcBalance)) * percentage;
-        setAmount(value.toFixed(2));
-    }
-  };
-
-  const handleSellPercentageClick = (percentage: number) => {
-    if (userSelectedOutcomeShares > 0n) {
-        const value = Number(formatUnits(userSelectedOutcomeShares, 18)) * percentage;
-        setSharesToSell(value.toFixed(4));
-    }
-  };
-
-  const handleRemoveLiquidity = () => {
-      if (!liquidityToRemove) return;
-      
-      setPendingTxType("removeLiquidity");
-      txToast.showPending("removeLiquidity", `Withdrawing ${liquidityToRemove} LP tokens`);
-      
-      try {
-          // LP shares are in 18 decimals
-          const sharesAmount = parseUnits(liquidityToRemove, 18);
-          writeContract({
-              address: PREDICTION_MARKET_ADDRESS,
-              abi: PREDICTION_MARKET_ABI,
-              functionName: 'removeLiquidity',
-              args: [market.id, sharesAmount]
-          });
-      } catch (e: unknown) {
-          txToast.showError("removeLiquidity", e);
-          setPendingTxType(null);
-      }
-  };
-
-  const handleClaimFees = () => {
-      setPendingTxType("claimFees");
-      txToast.showPending("claimFees");
-      
-      try {
-          writeContract({
-              address: PREDICTION_MARKET_ADDRESS,
-              abi: PREDICTION_MARKET_ABI,
-              functionName: 'claimFees',
-              args: [market.id]
-          });
-      } catch (e: unknown) {
-          txToast.showError("claimFees", e);
-          setPendingTxType(null);
-      }
-  };
-
-  const handleClaimLiquidity = () => {
-      setPendingTxType("claimLiquidity");
-      txToast.showPending("claimLiquidity");
-      
-      try {
-          writeContract({
-              address: PREDICTION_MARKET_ADDRESS,
-              abi: PREDICTION_MARKET_ABI,
-              functionName: 'claimLiquidity',
-              args: [market.id]
-          });
-      } catch (e: unknown) {
-          txToast.showError("claimLiquidity", e);
-          setPendingTxType(null);
-      }
-  };
-
-  const handleLiquidityPercentageClick = (percentage: number) => {
-    if (userLiquidity > 0n) {
-        const value = Number(formatUnits(userLiquidity, 18)) * percentage;
-        setLiquidityToRemove(value.toFixed(4));
-    }
-  };
-
-  const isBatchConfirming = !!batchId && batchStatus?.status === 'pending';
-  const isLoading = isWritePending || isConfirming || isBatchPending || isBatchConfirming;
-
-  // Market Status
-  const now = Date.now();
-  const closesAtMs = Number(market.closesAt) * 1000;
-  const isClosed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
-  const isResolved = market.state === 2;
-  
-  const resolvedOutcomeId = Number(market.resolvedOutcomeId);
-  // A market is voided when resolvedOutcomeId is -1 (contract uses int256) or >= outcomeCount
-  const isVoided = isResolved && (resolvedOutcomeId < 0 || resolvedOutcomeId >= market.outcomeCount);
-  const hasWinningShares = isResolved && !isVoided && userOutcomeShares[resolvedOutcomeId] > 0n;
-  // For voided markets, check if user has any shares to reclaim
-  const hasVoidedShares = isVoided && userOutcomeShares.some(s => s > 0n);
-  
-  // Get outcome titles - use actual names from market data if available
   const outcomeTitles = market.outcomes && market.outcomes.length === market.outcomeCount
     ? market.outcomes
     : market.outcomeCount === 2
       ? ["Yes", "No"]
       : Array.from({ length: market.outcomeCount }).map((_, i) => `Option ${i + 1}`);
 
-  // Pre-sorted outcomes by likelihood (only compute when prices are loaded)
   const sortedOutcomes = useMemo(() => {
-      return outcomeTitles
-          .map((title, idx) => ({ title, idx, price: outcomePrices[idx] ?? 0 }))
-          .sort((a, b) => b.price - a.price);
+    return outcomeTitles
+      .map((title, idx) => ({ title, idx, price: outcomePrices[idx] ?? 0 }))
+      .sort((a, b) => b.price - a.price);
   }, [outcomeTitles, outcomePrices]);
-  
-  const winningOutcomeName = isResolved && !isVoided ? (outcomeTitles[resolvedOutcomeId] ?? "Unknown") : "";
 
-  // ---- Resolved P&L (story card) ----
-  const winningsToClaim = claimStatus ? (claimStatus[0] ?? false) : false;
-  const winningsClaimed = claimStatus ? (claimStatus[1] ?? false) : false;
+  const handleBet = () => {
+    if (!amount) return;
+    marketAction.bet(selectedOutcome, amount, needsApproval, outcomeTitles[selectedOutcome]);
+  };
+
+  const handleClaimWinnings = () => marketAction.claimWinnings();
+  
+  const handleClaimRefund = () => {
+    const outcomeIdx = userOutcomeShares.findIndex((s: bigint) => s > 0n);
+    if (outcomeIdx === -1) return;
+    marketAction.claimRefund(outcomeIdx);
+  };
+
+  const handlePercentageClick = (percentage: number) => {
+    if (usdcBalance) {
+      const value = Number(formatUSDC(usdcBalance)) * percentage;
+      setAmount(value.toFixed(2));
+    }
+  };
+
+  const now = Date.now();
+  const closesAtMs = Number(market.closesAt) * 1_000;
+  const isClosed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
+  const isResolved = market.state === 2;
+  const isVoided = market.state === 3;
+  
+  const resolvedOutcomeIdx = Number(market.resolvedOutcome);
+  const hasWinningShares = isResolved && !isVoided && userOutcomeShares[resolvedOutcomeIdx] > 0n;
+  const hasVoidedShares = isVoided && userOutcomeShares.some((s: bigint) => s > 0n);
+  const winningOutcomeName = isResolved && !isVoided ? (outcomeTitles[resolvedOutcomeIdx] ?? "Unknown") : "";
+
   const claimableWinnings = useMemo(() => {
     if (!isResolved) return 0n;
-    if (!winningsToClaim || winningsClaimed) return 0n;
-    return userOutcomeShares[resolvedOutcomeId] ?? 0n;
-  }, [isResolved, winningsToClaim, winningsClaimed, userOutcomeShares, resolvedOutcomeId]);
+    return claimableAmount;
+  }, [isResolved, claimableAmount]);
 
   const { data: userCashflow } = useQuery({
-    queryKey: ["user-market-cashflow", market.id.toString(), address?.toLowerCase() ?? ""],
+    queryKey: queryKeys.user.cashflow(market.id.toString(), address?.toLowerCase() ?? ""),
     enabled: !!publicClient && isConnected && !!address && (isClosed || isResolved),
     queryFn: async () => {
       if (!publicClient || !address) {
-        return { buyOut: 0n, sellIn: 0n, winningsIn: 0n };
+        return { betOut: 0n, winningsIn: 0n };
       }
 
       const event = parseAbiItem(
-        "event MarketActionTx(address indexed user, uint8 indexed action, uint256 indexed marketId, uint256 outcomeId, uint256 shares, uint256 value, uint256 timestamp)"
+        "event BetPlaced(uint256 indexed marketId, address indexed user, uint256 indexed outcomeId, uint256 amount)"
       );
 
-      type MarketActionTxLog = {
-        args?: {
-          user?: string;
-          action?: bigint | number;
-          value?: bigint;
-        };
-        transactionHash?: `0x${string}`;
-      };
-
-      let logs: MarketActionTxLog[] = [];
+      let logs = [];
       try {
-        // Try indexed filtering first (fast path)
         logs = await publicClient.getLogs({
           address: PREDICTION_MARKET_ADDRESS,
           event,
@@ -642,7 +183,6 @@ export function TradePanel({
           fromBlock: "earliest",
         });
       } catch {
-        // Fallback: fetch by marketId only, then filter locally
         const marketLogs = await publicClient.getLogs({
           address: PREDICTION_MARKET_ADDRESS,
           event,
@@ -650,797 +190,396 @@ export function TradePanel({
           fromBlock: "earliest",
         });
         const addr = address.toLowerCase();
-        logs = marketLogs.filter((l) => String(l.args?.user ?? "").toLowerCase() === addr);
+        logs = marketLogs.filter((l: { args?: { user?: string } }) => String(l.args?.user ?? "").toLowerCase() === addr);
       }
 
-      let buyOut = 0n;
-      let sellIn = 0n;
-      let winningsIn = 0n;
-
+      let betOut = 0n;
       for (const log of logs) {
-        const action = Number(log.args?.action ?? -1);
-        const value = log.args?.value ?? 0n;
-
-        // 0 = buy (gross paid)
-        if (action === 0) {
-          buyOut += value;
-          continue;
-        }
-
-        // 4 = claimWinnings (exact received)
-        if (action === 4) {
-          winningsIn += value;
-          continue;
-        }
-
-        // 1 = sell (event value includes fees; decode tx input for net received)
-        if (action === 1) {
-          const txHash = log.transactionHash;
-          if (!txHash) {
-            sellIn += value;
-            continue;
-          }
-          try {
-            const tx = await publicClient.getTransaction({ hash: txHash });
-            const decoded = decodeFunctionData({
-              abi: PREDICTION_MARKET_ABI,
-              data: tx.input,
-            });
-
-            // sell(marketId, outcomeId, value, maxOutcomeSharesToSell)
-            // referralSell(marketId, outcomeId, value, maxOutcomeSharesToSell, code)
-            // sellToETH/referralSellToETH have same positional `value` argument
-            const fn = decoded.functionName;
-            if (
-              fn === "sell" ||
-              fn === "sellToETH" ||
-              fn === "referralSell" ||
-              fn === "referralSellToETH"
-            ) {
-              const args = decoded.args as readonly unknown[] | undefined;
-              const netValue = toBigIntSafe(args?.[2]);
-              sellIn += netValue;
-            } else {
-              // Fallback to event value (may overstate due to fees)
-              sellIn += value;
-            }
-          } catch {
-            // If we can't decode, fallback to event value
-            sellIn += value;
-          }
-          continue;
-        }
+        betOut += log.args?.amount ?? 0n;
       }
 
-      return { buyOut, sellIn, winningsIn };
+      // Check for claimed winnings
+      const claimEvent = parseAbiItem(
+        "event WinningsClaimed(uint256 indexed marketId, address indexed user, uint256 amount)"
+      );
+      
+      let winningsIn = 0n;
+      try {
+        const claimLogs = await publicClient.getLogs({
+          address: PREDICTION_MARKET_ADDRESS,
+          event: claimEvent,
+          args: { user: address, marketId: market.id },
+          fromBlock: "earliest",
+        });
+        for (const log of claimLogs) {
+          winningsIn += log.args?.amount ?? 0n;
+        }
+      } catch {}
+
+      return { betOut, winningsIn };
     },
     staleTime: 20_000,
     refetchInterval: isResolved ? 0 : 10_000,
   });
 
-  const formatMoney = (v: bigint) => `$${parseFloat(formatUnits(v, USDC_DECIMALS)).toFixed(2)}`;
-  const netReceivedInclClaimable = (userCashflow?.sellIn ?? 0n) + (userCashflow?.winningsIn ?? 0n) + claimableWinnings;
-  const netSpent = userCashflow?.buyOut ?? 0n;
+  const formatMoney = (v: bigint) => `$${parseFloat(formatUnits(v, USDC.decimals)).toFixed(2)}`;
+  const netReceivedInclClaimable = (userCashflow?.winningsIn ?? 0n) + claimableWinnings;
+  const netSpent = userCashflow?.betOut ?? 0n;
   const netPnl = netReceivedInclClaimable - netSpent;
   const absPnl = netPnl < 0n ? -netPnl : netPnl;
-  const pnlTone =
-    netPnl > 0n ? "win" : netPnl < 0n ? "loss" : "even";
+  const pnlTone = netPnl > 0n ? "win" : netPnl < 0n ? "loss" : "even";
   const showPnlStory =
     isResolved &&
     (netSpent > 0n ||
       netReceivedInclClaimable > 0n ||
-      userOutcomeShares.some((s) => s > 0n));
+      userOutcomeShares.some((s: bigint) => s > 0n));
 
-  const handleClaimWinnings = () => {
-    setPendingTxType("claimWinnings");
-    txToast.showPending("claimWinnings");
-    
-    try {
-        writeContract({
-            address: PREDICTION_MARKET_ADDRESS,
-            abi: PREDICTION_MARKET_ABI,
-            functionName: 'claimWinnings',
-            args: [market.id]
-        });
-    } catch (e: unknown) {
-        txToast.showError("claimWinnings", e);
-        setPendingTxType(null);
-    }
-  };
-
-  // For voided markets, claim each outcome's shares
-  const handleClaimVoided = () => {
-    // Find the first outcome with shares to claim
-    const outcomeIdx = userOutcomeShares.findIndex(s => s > 0n);
-    if (outcomeIdx === -1) return;
-    
-    setPendingTxType("claimWinnings"); // Reuse the same toast type
-    txToast.showPending("claimWinnings", "Reclaiming your funds...");
-    
-    try {
-        writeContract({
-            address: PREDICTION_MARKET_ADDRESS,
-            abi: PREDICTION_MARKET_ABI,
-            functionName: 'claimVoidedOutcomeShares',
-            args: [market.id, BigInt(outcomeIdx)]
-        });
-    } catch (e: unknown) {
-        txToast.showError("claimWinnings", e);
-        setPendingTxType(null);
-    }
-  };
-
-  if (isClosed || isResolved) {
+  if (isClosed || isResolved || isVoided) {
     return (
-        <div className={cn(
-            embedded ? "" : "border border-border rounded-xl bg-card overflow-hidden"
-        )}>
-            {/* Status Header - matches tab header style */}
-            <div className="border-b border-border bg-transparent p-4">
-                <div className="flex items-center gap-2">
-                    {isResolved ? (
-                        isVoided ? (
-                            <Lock className="w-4 h-4 text-muted-foreground" />
-                        ) : (
-                            <Coins className="w-4 h-4 text-yellow-500" />
-                        )
-                    ) : (
-                        <Lock className="w-4 h-4 text-muted-foreground" />
-                    )}
-                    <span className="font-medium">
-                        {isVoided ? "Market Canceled" : isResolved ? "Market Resolved" : "Market Closed"}
-                    </span>
-                    {isResolved && !isVoided && (
-                        <span className={cn(
-                            "ml-auto text-sm font-semibold", 
-                            resolvedOutcomeId === 0 ? "text-emerald-500" : "text-red-500"
-                        )}>
-                            {winningOutcomeName} wins
-                        </span>
-                    )}
-                </div>
-            </div>
-
-            <div className="p-4 sm:p-6 w-full">
-                <div className="space-y-3">
-                    {/* Status message */}
-                    <p className="text-sm text-muted-foreground">
-                        {isVoided 
-                            ? "This prediction was canceled. You can reclaim your original investment."
-                            : isResolved 
-                                ? "This market has been finalized." 
-                                : "Prediction period closed, awaiting final outcome."}
-                    </p>
-
-                    {/* Resolved P&L story (skip for voided - show simpler UI) */}
-                    {showPnlStory && !isVoided && (
-                        <div className={cn(
-                            "rounded-lg border px-3 sm:px-4 py-3 sm:py-4",
-                            pnlTone === "win" && "border-emerald-500/25 bg-linear-to-br from-emerald-500/10 via-transparent to-emerald-500/15",
-                            pnlTone === "loss" && "border-red-500/25 bg-linear-to-br from-red-500/10 via-transparent to-red-500/15",
-                            pnlTone === "even" && "border-border/60 bg-muted/10"
-                        )}>
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="space-y-1">
-                                    <div className={cn(
-                                        "text-sm font-semibold",
-                                        pnlTone === "win" && "text-emerald-500",
-                                        pnlTone === "loss" && "text-red-500"
-                                    )}>
-                                        {pnlTone === "win" ? "You won" : pnlTone === "loss" ? "You lost" : "You broke even"}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        Resolved to <span className="font-medium text-foreground">{winningOutcomeName}</span>.
-                                        {claimableWinnings > 0n ? " (Includes unclaimed winnings)" : ""}
-                                    </div>
-                                </div>
-                                <div className={cn(
-                                    "text-right font-mono text-2xl font-bold leading-none tabular-nums",
-                                    pnlTone === "win" && "text-emerald-500",
-                                    pnlTone === "loss" && "text-red-500",
-                                    pnlTone === "even" && "text-foreground"
-                                )}>
-                                    {pnlTone === "loss" ? "-" : pnlTone === "win" ? "+" : ""}
-                                    {formatMoney(absPnl)}
-                                </div>
-                            </div>
-
-                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:text-sm">
-                                <div className="flex items-center justify-between rounded-md border border-border/50 bg-background/40 px-2.5 py-2 text-muted-foreground">
-                                    <span>Spent</span>
-                                    <span className="font-mono text-foreground">{formatMoney(netSpent)}</span>
-                                </div>
-                                <div className="flex items-center justify-between rounded-md border border-border/50 bg-background/40 px-2.5 py-2 text-muted-foreground">
-                                    <span>Received</span>
-                                    <span className="font-mono text-foreground">{formatMoney(netReceivedInclClaimable)}</span>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* User Position Summary - only show if NOT showing P&L story, or if user has liquidity/fees */}
-                    {/* When P&L story is shown, positions are redundant since spent/received is already displayed */}
-                    {!showPnlStory && hasAnyPosition && (
-                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3">
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                    Your positions
-                                </span>
-                            </div>
-                            
-                            {/* Outcome Shares cards */}
-                            <div className={cn(
-                                "gap-2",
-                                positionIndices.length > 1 ? "grid grid-cols-2" : "grid grid-cols-1"
-                            )}>
-                                {positionIndices.map(({ shares, idx }) => {
-                                    const title = outcomeTitles[idx] ?? `Outcome ${idx + 1}`;
-                                    const baseColor = getOutcomeColor(title, idx);
-                                    return (
-                                        <div 
-                                            key={idx}
-                                            className="relative overflow-hidden rounded-lg px-3 py-2.5"
-                                            style={{
-                                                borderColor: `${baseColor}40`,
-                                                borderWidth: '1px',
-                                                background: `linear-gradient(to bottom right, ${baseColor}15, transparent, ${baseColor}20)`
-                                            }}
-                                        >
-                                            <div 
-                                                className="absolute inset-0 opacity-60" 
-                                                style={{ background: `linear-gradient(to top, ${baseColor}15, transparent)` }}
-                                            />
-                                            <div className="relative flex items-center justify-between">
-                                                <span className="text-xs text-muted-foreground">{title}</span>
-                                                <span 
-                                                    className="text-base font-mono font-semibold"
-                                                    style={{ color: baseColor }}
-                                                >
-                                                    ${parseFloat(formatUnits(shares, USDC_DECIMALS)).toFixed(2)}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Liquidity & Fees - show separately when user has LP position */}
-                    {(userLiquidity > 0n || userClaimableFees > 0n) && (
-                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-1.5 text-xs sm:text-sm">
-                            {userLiquidity > 0n && (
-                                <div className="flex justify-between text-muted-foreground">
-                                    <span>Liquidity</span>
-                                    <span className="text-foreground font-mono">
-                                        ${parseFloat(formatUnits(userLiquidity, USDC_DECIMALS)).toFixed(2)}
-                                    </span>
-                                </div>
-                            )}
-                            {userClaimableFees > 0n && (
-                                <div className="flex justify-between text-muted-foreground">
-                                    <span>Fees earned</span>
-                                    <span className="text-emerald-500 font-mono">
-                                        ${parseFloat(formatUSDC(userClaimableFees)).toFixed(2)}
-                                    </span>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Actions - always show when user has something to claim */}
-                    {(hasWinningShares || hasVoidedShares || userClaimableFees > 0n || (isResolved && userLiquidity > 0n)) && (
-
-                        <div className="space-y-2">
-                            {hasWinningShares && (
-                                <Button 
-                                    onClick={handleClaimWinnings}
-                                    disabled={isLoading}
-                                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
-                                >
-                                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
-                                    Claim Winnings
-                                </Button>
-                            )}
-                            
-                            {hasVoidedShares && (
-                                <Button 
-                                    onClick={handleClaimVoided}
-                                    disabled={isLoading}
-                                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]"
-                                >
-                                    {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
-                                    Reclaim Funds
-                                </Button>
-                            )}
-                            
-                            {userClaimableFees > 0n && (
-                                <Button 
-                                    variant="outline"
-                                    onClick={handleClaimFees}
-                                    disabled={isLoading}
-                                    className="w-full"
-                                >
-                                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Coins className="mr-2 h-4 w-4" />}
-                                    Claim Fees
-                                </Button>
-                            )}
-                            
-                            {isResolved && userLiquidity > 0n && (
-                                <Button 
-                                    variant="outline"
-                                    onClick={handleClaimLiquidity}
-                                    disabled={isLoading}
-                                    className="w-full"
-                                >
-                                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowDownToLine className="mr-2 h-4 w-4" />}
-                                    Claim Liquidity
-                                </Button>
-                            )}
-                        </div>
-                    )}
-
-                    {/* No position message */}
-                    {!(userLiquidity > 0n || userClaimableFees > 0n || userOutcomeShares.some(s => s > 0n)) && (
-                        <div className="p-3 bg-muted/30 rounded-lg text-xs text-muted-foreground border border-border/50">
-                            <p>You have no active position in this market.</p>
-                        </div>
-                    )}
-                </div>
-            </div>
+      <div className={cn(
+        embedded ? "" : "border border-border rounded-xl bg-card overflow-hidden"
+      )}>
+        <div className="border-b border-border bg-transparent p-4">
+          <div className="flex items-center gap-2">
+            {isResolved || isVoided ? (
+              isVoided ? (
+                <Lock className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <Coins className="w-4 h-4 text-yellow-500" />
+              )
+            ) : (
+              <Lock className="w-4 h-4 text-muted-foreground" />
+            )}
+            <span className="font-medium">
+              {isVoided ? "Market Canceled" : isResolved ? "Market Resolved" : "Market Closed"}
+            </span>
+            {isResolved && !isVoided && (
+              <span className={cn(
+                "ml-auto text-sm font-semibold", 
+                resolvedOutcomeIdx === 0 ? "text-emerald-500" : "text-red-500"
+              )}>
+                {winningOutcomeName} wins
+              </span>
+            )}
+          </div>
         </div>
+
+        <div className="p-4 sm:p-6 w-full">
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {isVoided 
+                ? "This prediction was canceled. You can reclaim your original bet."
+                : isResolved 
+                  ? "This market has been finalized." 
+                  : "Prediction period closed, awaiting final outcome."}
+            </p>
+
+            {showPnlStory && !isVoided && (
+              <div className={cn(
+                "rounded-lg border px-3 sm:px-4 py-3 sm:py-4",
+                pnlTone === "win" && "border-emerald-500/25 bg-linear-to-br from-emerald-500/10 via-transparent to-emerald-500/15",
+                pnlTone === "loss" && "border-red-500/25 bg-linear-to-br from-red-500/10 via-transparent to-red-500/15",
+                pnlTone === "even" && "border-border/60 bg-muted/10"
+              )}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className={cn(
+                      "text-sm font-semibold",
+                      pnlTone === "win" && "text-emerald-500",
+                      pnlTone === "loss" && "text-red-500"
+                    )}>
+                      {pnlTone === "win" ? "You won" : pnlTone === "loss" ? "You lost" : "You broke even"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Resolved to <span className="font-medium text-foreground">{winningOutcomeName}</span>.
+                      {claimableWinnings > 0n ? " (Includes unclaimed winnings)" : ""}
+                    </div>
+                  </div>
+                  <div className={cn(
+                    "text-right font-mono text-2xl font-bold leading-none tabular-nums",
+                    pnlTone === "win" && "text-emerald-500",
+                    pnlTone === "loss" && "text-red-500",
+                    pnlTone === "even" && "text-foreground"
+                  )}>
+                    {pnlTone === "loss" ? "-" : pnlTone === "win" ? "+" : ""}
+                    {formatMoney(absPnl)}
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:text-sm">
+                  <div className="flex items-center justify-between rounded-md border border-border/50 bg-background/40 px-2.5 py-2 text-muted-foreground">
+                    <span>Bet</span>
+                    <span className="font-mono text-foreground">{formatMoney(netSpent)}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border/50 bg-background/40 px-2.5 py-2 text-muted-foreground">
+                    <span>Received</span>
+                    <span className="font-mono text-foreground">{formatMoney(netReceivedInclClaimable)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!showPnlStory && hasAnyPosition && (
+              <div className="rounded-lg border border-border/60 bg-muted/10 p-3 sm:p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Your bets
+                  </span>
+                </div>
+                
+                <div className={cn(
+                  "gap-2",
+                  positionIndices.length > 1 ? "grid grid-cols-2" : "grid grid-cols-1"
+                )}>
+                  {positionIndices.map(({ shares, idx }: { shares: bigint; idx: number }) => {
+                    const title = outcomeTitles[idx] ?? `Outcome ${idx + 1}`;
+                    const baseColor = getOutcomeColor(title, idx);
+                    return (
+                      <div 
+                        key={idx}
+                        className="relative overflow-hidden rounded-lg px-3 py-2.5"
+                        style={{
+                          borderColor: `${baseColor}40`,
+                          borderWidth: '1px',
+                          background: `linear-gradient(to bottom right, ${baseColor}15, transparent, ${baseColor}20)`
+                        }}
+                      >
+                        <div 
+                          className="absolute inset-0 opacity-60" 
+                          style={{ background: `linear-gradient(to top, ${baseColor}15, transparent)` }}
+                        />
+                        <div className="relative flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">{title}</span>
+                          <span 
+                            className="text-base font-mono font-semibold"
+                            style={{ color: baseColor }}
+                          >
+                            ${parseFloat(formatUnits(shares, USDC.decimals)).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {(hasWinningShares || hasVoidedShares) && (
+              <div className="space-y-2">
+                {hasWinningShares && canClaim && (
+                  <Button 
+                    onClick={handleClaimWinnings}
+                    disabled={marketAction.isLoading}
+                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
+                  >
+                    {marketAction.isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
+                    Claim Winnings
+                  </Button>
+                )}
+                
+                {hasVoidedShares && (
+                  <Button 
+                    onClick={handleClaimRefund}
+                    disabled={marketAction.isLoading}
+                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]"
+                  >
+                    {marketAction.isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
+                    Reclaim Funds
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {!userOutcomeShares.some((s: bigint) => s > 0n) && (
+              <div className="p-3 bg-muted/30 rounded-lg text-xs text-muted-foreground border border-border/50">
+                <p>You have no bets in this market.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="border border-border rounded-xl bg-card overflow-hidden">
-      <div className="w-full flex flex-col">
-        <Tabs 
-            value={activeTab} 
-            onValueChange={(val) => setActiveTab(val as TabType)}
-            className="w-full"
-        >
-            <div className="border-b border-border bg-transparent p-2">
-                <TabsList className="w-full grid grid-cols-3">
-                    <TabsTrigger value="buy">Buy</TabsTrigger>
-                    <TabsTrigger value="sell">Sell</TabsTrigger>
-                    <TabsTrigger value="liquidity">Liquidity</TabsTrigger>
-                </TabsList>
+    <div className={cn(
+      "border border-border rounded-xl bg-card overflow-hidden",
+      embedded && "border-0"
+    )}>
+      <div className="border-b border-border bg-transparent p-4">
+        <div className="flex items-center gap-2">
+          <DollarSign className="w-4 h-4 text-emerald-500" />
+          <span className="font-medium">Place Bet</span>
+        </div>
+      </div>
+
+      <div className="p-4 sm:p-6 w-full">
+        <div className="space-y-4">
+          <div className="space-y-3">
+            <Label className="text-sm text-muted-foreground">Select outcome</Label>
+            {!pricesLoaded ? (
+              <div className="flex flex-col gap-2">
+                {Array.from({ length: market.outcomeCount }).map((_, idx) => (
+                  <div key={idx} className="h-12 rounded-lg border border-border bg-card/50 animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {sortedOutcomes.map(({ title, idx, price }) => {
+                  const isSelected = selectedOutcome === idx;
+                  const colors = getOutcomeClasses(title);
+                  const baseColor = getOutcomeColor(title, idx);
+                  
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => onOutcomeChange(idx)}
+                      className={cn(
+                        "relative flex items-center justify-between p-3 rounded-lg border transition-all duration-200 w-full",
+                        isSelected 
+                          ? "border-transparent ring-2 ring-offset-1 ring-offset-background" 
+                          : "border-border hover:border-border/80 bg-card/50",
+                        isSelected ? colors.bgLight : ""
+                      )}
+                      style={{
+                        boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
+                      }}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div 
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: baseColor }}
+                        />
+                        <span className="font-medium truncate">{title}</span>
+                      </div>
+                      <span className="font-mono font-medium ml-2 shrink-0">
+                        {(price * 100).toFixed(1)}%
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <Label className="text-sm text-muted-foreground">Amount (USDC)</Label>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Wallet className="w-3 h-3" />
+                <span>Balance: {balanceFormatted.toFixed(2)} USDC</span>
+              </div>
             </div>
-        
-            <div className="relative overflow-hidden w-full">
-            <div className="p-4 sm:p-6 w-full">
-                <TabsContents>
-                    <TabsContent value="buy" className="p-1">
-                    <div className="space-y-4">
-                        {/* Outcome Selection - sorted by likelihood */}
-                        <div className="space-y-3">
-                            <Label className="text-sm text-muted-foreground">Select outcome</Label>
-                            {!pricesLoaded ? (
-                                <div className="flex flex-col gap-2">
-                                    {Array.from({ length: market.outcomeCount }).map((_, idx) => (
-                                        <div key={idx} className="h-12 rounded-lg border border-border bg-card/50 animate-pulse" />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="flex flex-col gap-2">
-                                    {sortedOutcomes.map(({ title, idx, price }) => {
-                                        const isSelected = selectedOutcome === idx;
-                                        const colors = getOutcomeClasses(title);
-                                        const baseColor = getOutcomeColor(title, idx);
-                                        
-                                        return (
-                                        <button
-                                            key={idx}
-                                            onClick={() => onOutcomeChange(idx)}
-                                            className={cn(
-                                                "relative flex items-center justify-between p-3 rounded-lg border transition-all duration-200 w-full",
-                                                isSelected 
-                                                    ? "border-transparent ring-2 ring-offset-1 ring-offset-background" 
-                                                    : "border-border hover:border-border/80 bg-card/50",
-                                                isSelected ? colors.bgLight : ""
-                                            )}
-                                            style={{
-                                                boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
-                                            }}
-                                        >
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    <div 
-                                                        className="w-2 h-2 rounded-full shrink-0"
-                                                        style={{ backgroundColor: baseColor }}
-                                                    />
-                                                    <span className="font-medium truncate">{title}</span>
-                                                </div>
-                                                <span className="font-mono font-medium ml-2 shrink-0">
-                                                    {(price * 100).toFixed(1)}%
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Amount Input */}
-                        <div className="space-y-3">
-                            <div className="flex justify-between items-center">
-                                <Label className="text-sm text-muted-foreground">Amount (USDC)</Label>
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                    <Wallet className="w-3 h-3" />
-                                    <span>Balance: {usdcBalance !== undefined ? parseFloat(formatUSDC(usdcBalance)).toFixed(2) : '0'} USDC</span>
-                                </div>
-                            </div>
-                            
-                            <div className="flex flex-wrap gap-2">
-                                <div className="relative flex-1 min-w-[120px]">
-                                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                    <Input 
-                                        type="number" 
-                                        value={amount} 
-                                        onChange={(e) => setAmount(e.target.value)}
-                                        placeholder="0.00"
-                                        className="pl-9"
-                                    />
-                                </div>
-                                <div className="flex gap-1 shrink-0">
-                                    {[0.25, 0.5, 1].map((pct) => (
-                                        <Button 
-                                            key={pct}
-                                            variant="outline" 
-                                            size="sm"
-                                            onClick={() => handlePercentageClick(pct)}
-                                            className="px-2 min-w-12"
-                                        >
-                                            {pct * 100}%
-                                        </Button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Order Summary */}
-                        <div className="space-y-3 pt-0">
-                            <Button 
-                                className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
-                                onClick={handleBuy} 
-                                disabled={isLoading || !amount}
-                            >
-                                {isLoading ? (
-                                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                ) : (
-                                    "Buy"
-                                )}
-                            </Button>
-
-                            <div className="space-y-2 text-sm">
-                                <div className="flex justify-between text-muted-foreground">
-                                    <span>Price per share</span>
-                                    <span className="text-foreground">
-                                        {outcomePrices[selectedOutcome] > 0 
-                                            ? `$${outcomePrices[selectedOutcome].toFixed(4)}` 
-                                            : '-'}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between text-muted-foreground">
-                                    <span>Est. Shares</span>
-                                    <span className="text-foreground">{formatShares(Number(formatUnits(simulatedBuyShares, 18)))}</span>
-                                </div>
-                                <div className="flex justify-between text-muted-foreground">
-                                    <span>Payout if win</span>
-                                    <span className={cn(
-                                        "font-medium",
-                                        amount && Number(amount) > 0 && Number(formatUnits(simulatedBuyShares, 18)) >= Number(amount)
-                                            ? "text-emerald-500"
-                                            : "text-rose-500"
-                                    )}>
-                                        {simulatedBuyShares > 0n 
-                                            ? `$${Number(formatUnits(simulatedBuyShares, 18)).toFixed(2)}` 
-                                            : '$0.00'} 
-                                        {' '}
-                                        ({amount && Number(amount) > 0 
-                                            ? `${Number(formatUnits(simulatedBuyShares, 18)) >= Number(amount) ? '+' : ''}${((Number(formatUnits(simulatedBuyShares, 18)) / Number(amount) - 1) * 100).toFixed(0)}` 
-                                            : '0'}%)
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    </TabsContent>
-
-                    <TabsContent value="sell" className="p-1">
-                    <div className="space-y-4">
-                        {/* Outcome Selection - sorted by likelihood */}
-                        <div className="space-y-3">
-                            <Label className="text-sm text-muted-foreground">Select outcome</Label>
-                            {!pricesLoaded ? (
-                                <div className="flex flex-col gap-2">
-                                    {Array.from({ length: market.outcomeCount }).map((_, idx) => (
-                                        <div key={idx} className="h-12 rounded-lg border border-border bg-card/50 animate-pulse" />
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="flex flex-col gap-2">
-                                    {sortedOutcomes.map(({ title, idx }) => {
-                                        const userSharesForOutcome = userOutcomeShares[idx] ?? 0n;
-                                        const isSelected = selectedOutcome === idx;
-                                        const colors = getOutcomeClasses(title);
-                                        const baseColor = getOutcomeColor(title, idx);
-                                        
-                                        return (
-                                        <button
-                                            key={idx}
-                                            onClick={() => onOutcomeChange(idx)}
-                                            className={cn(
-                                                "relative flex items-center justify-between p-3 rounded-lg border transition-all duration-200 w-full",
-                                                isSelected 
-                                                    ? "border-transparent ring-2 ring-offset-1 ring-offset-background" 
-                                                    : "border-border hover:border-border/80 bg-card/50",
-                                                isSelected ? colors.bgLight : ""
-                                            )}
-                                            style={{
-                                                boxShadow: isSelected ? `0 0 0 2px ${baseColor}` : undefined
-                                            }}
-                                        >
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    <div 
-                                                        className="w-2 h-2 rounded-full shrink-0"
-                                                        style={{ backgroundColor: baseColor }}
-                                                    />
-                                                    <span className="font-medium truncate">{title}</span>
-                                                </div>
-                                                <span className="font-mono font-medium ml-2 shrink-0">
-                                                    {parseFloat(formatUnits(userSharesForOutcome, 18)).toFixed(2)} shares
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Shares Input */}
-                        <div className="space-y-3">
-                            <div className="flex justify-between items-center">
-                                <Label className="text-sm text-muted-foreground">Shares to Sell</Label>
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                    <Wallet className="w-3 h-3" />
-                                    <span>Available: {userSelectedOutcomeShares > 0n ? parseFloat(formatUnits(userSelectedOutcomeShares, 18)).toFixed(4) : '0'} shares</span>
-                                </div>
-                            </div>
-                            
-                            <div className="flex flex-wrap gap-2">
-                                <div className="relative flex-1 min-w-[120px]">
-                                    <Input 
-                                        type="number" 
-                                        value={sharesToSell} 
-                                        onChange={(e) => setSharesToSell(e.target.value)}
-                                        placeholder="0.00"
-                                    />
-                                </div>
-                                <div className="flex gap-1">
-                                    {[0.25, 0.5, 1].map((pct) => (
-                                        <Button 
-                                            key={pct}
-                                            variant="outline" 
-                                            size="sm"
-                                            onClick={() => handleSellPercentageClick(pct)}
-                                            className="px-2 min-w-12"
-                                        >
-                                            {pct * 100}%
-                                        </Button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Sell Button */}
-                        <div className="space-y-3 pt-0">
-                            <Button 
-                                className={cn(
-                                    "w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]",
-                                    "bg-red-600 hover:bg-red-500 text-white"
-                                )}
-                                onClick={handleSell} 
-                                disabled={isLoading || !sharesToSell}
-                            >
-                                {isLoading ? (
-                                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                ) : (
-                                    "Sell"
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                    </TabsContent>
-
-                    <TabsContent value="liquidity" className="p-1">
-                    <div className="space-y-4">
-                        {/* User's Position Summary */}
-                        {isConnected && (userLiquidity > 0n || userClaimableFees > 0n) && (
-                            <div className="p-4 bg-linear-to-br from-blue-500/10 to-purple-500/10 rounded-lg border border-blue-500/20">
-                                <div className="flex items-center justify-between mb-3">
-                                    <div className="flex items-center gap-2">
-                                        <Droplets className="w-4 h-4 text-blue-400" />
-                                        <span className="text-sm font-medium">Your Position</span>
-                                    </div>
-                                    <div className="flex gap-2">
-                                         {userClaimableFees > 0n && (
-                                            <Button 
-                                                variant="ghost" 
-                                                size="sm" 
-                                                onClick={handleClaimFees}
-                                                disabled={isLoading}
-                                                className="h-7 text-xs text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10 px-2"
-                                            >
-                                                {isLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Coins className="mr-1 h-3 w-3" />}
-                                                Claim Fees
-                                            </Button>
-                                        )}
-                                        {canClaimLiquidity && (
-                                            <Button 
-                                                variant="ghost" 
-                                                size="sm" 
-                                                onClick={handleClaimLiquidity}
-                                                disabled={isLoading}
-                                                className="h-7 text-xs text-blue-500 hover:text-blue-400 hover:bg-blue-500/10 px-2"
-                                            >
-                                                {isLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ArrowDownToLine className="mr-1 h-3 w-3" />}
-                                                Claim Liquidity
-                                            </Button>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <div className="text-xs text-muted-foreground">Liquidity Provided</div>
-                                        <div className="text-lg font-semibold">{parseFloat(formatUnits(userLiquidity, 18)).toFixed(4)} LP</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-xs text-muted-foreground">Fees Earned</div>
-                                        <div className="text-lg font-semibold text-emerald-500">{parseFloat(formatUSDC(userClaimableFees)).toFixed(2)} USDC</div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Liquidity Action Toggle */}
-                        <div className="flex p-1 bg-muted/50 rounded-lg">
-                            <button
-                                onClick={() => setLiquidityTab("add")}
-                                className={cn(
-                                    "flex-1 text-sm font-medium py-1.5 px-3 rounded-md transition-all",
-                                    liquidityTab === "add" 
-                                        ? "bg-background shadow-sm text-foreground" 
-                                        : "text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                Add
-                            </button>
-                            <button
-                                onClick={() => setLiquidityTab("remove")}
-                                className={cn(
-                                    "flex-1 text-sm font-medium py-1.5 px-3 rounded-md transition-all",
-                                    liquidityTab === "remove" 
-                                        ? "bg-background shadow-sm text-foreground" 
-                                        : "text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                Withdraw
-                            </button>
-                        </div>
-
-                        {/* Withdraw Liquidity Section */}
-                        {liquidityTab === "remove" && (
-                            <div className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                    <Label className="text-sm text-muted-foreground">Amount (LP)</Label>
-                                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                        <span>Available: {parseFloat(formatUnits(userLiquidity, 18)).toFixed(4)} LP</span>
-                                    </div>
-                                </div>
-                                
-                                <div className="flex flex-wrap gap-2">
-                                    <div className="relative flex-1 min-w-[120px]">
-                                        <Input 
-                                            type="number" 
-                                            value={liquidityToRemove} 
-                                            onChange={(e) => setLiquidityToRemove(e.target.value)}
-                                            placeholder="0.00"
-                                        />
-                                    </div>
-                                    <div className="flex gap-1 shrink-0">
-                                        {[0.25, 0.5, 1].map((pct) => (
-                                            <Button 
-                                                key={pct}
-                                                variant="outline" 
-                                                size="sm"
-                                                onClick={() => handleLiquidityPercentageClick(pct)}
-                                                className="px-2 min-w-12"
-                                            >
-                                                {pct * 100}%
-                                            </Button>
-                                        ))}
-                                    </div>
-                                </div>
-                                
-                                <Button 
-                                    className={cn(
-                                        "w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]",
-                                        "bg-red-600 hover:bg-red-500 text-white"
-                                    )}
-                                    onClick={handleRemoveLiquidity} 
-                                    disabled={isLoading || !liquidityToRemove}
-                                >
-                                    {isLoading ? (
-                                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                    ) : (
-                                        "Withdraw Liquidity"
-                                    )}
-                                </Button>
-                            </div>
-                        )}
-
-                        {/* Add Liquidity Section */}
-                        {liquidityTab === "add" && (
-                            <div className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                    <Label className="text-sm text-muted-foreground">Amount (USDC)</Label>
-                                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                        <Wallet className="w-3 h-3" />
-                                        <span>Balance: {usdcBalance !== undefined ? parseFloat(formatUSDC(usdcBalance)).toFixed(2) : '0'} USDC</span>
-                                    </div>
-                                </div>
-                                
-                                <div className="flex flex-wrap gap-2">
-                                    <div className="relative flex-1 min-w-[120px]">
-                                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                        <Input 
-                                            type="number" 
-                                            value={amount} 
-                                            onChange={(e) => setAmount(e.target.value)}
-                                            placeholder="0.00"
-                                            className="pl-9"
-                                        />
-                                    </div>
-                                    <div className="flex gap-1 shrink-0">
-                                        {[0.25, 0.5, 1].map((pct) => (
-                                            <Button 
-                                                key={pct}
-                                                variant="outline" 
-                                                size="sm"
-                                                onClick={() => handlePercentageClick(pct)}
-                                                className="px-2 min-w-12"
-                                            >
-                                                {pct * 100}%
-                                            </Button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <Button 
-                                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-blue-600 hover:bg-blue-500 text-white"
-                                    onClick={handleAddLiquidity} 
-                                    disabled={isLoading || !amount}
-                                >
-                                    {isLoading ? (
-                                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                    ) : (
-                                        "Add Liquidity"
-                                    )}
-                                </Button>
-                            </div>
-                        )}
-
-                        {/* Info Box */}
-                        <div className="p-3 bg-muted/30 rounded-lg text-xs text-muted-foreground border border-border/50">
-                            <p>Liquidity providers earn fees from all trades. Your liquidity is distributed across all outcomes proportionally.</p>
-                        </div>
-                    </div>
-                    </TabsContent>
-                </TabsContents>
+            
+            <div className="flex flex-wrap gap-2">
+              <div className="relative flex-1 min-w-[120px]">
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input 
+                  type="number" 
+                  value={amount} 
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="pl-9"
+                />
+              </div>
+              <div className="flex gap-1 shrink-0">
+                {TRADING.PERCENTAGE_OPTIONS.map((pct) => (
+                  <Button 
+                    key={pct}
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => handlePercentageClick(pct)}
+                    className="px-2 min-w-12"
+                  >
+                    {pct * 100}%
+                  </Button>
+                ))}
+              </div>
             </div>
+          </div>
+
+          <div className="space-y-3 pt-0">
+            <Button 
+              className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
+              onClick={handleBet} 
+              disabled={marketAction.isLoading || !amount}
+            >
+              {marketAction.isLoading ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : (
+                "Place Bet"
+              )}
+            </Button>
+
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between text-muted-foreground">
+                <span>Current odds</span>
+                <span className="text-foreground">
+                  {outcomePrices[selectedOutcome] > 0 
+                    ? `${(outcomePrices[selectedOutcome] * 100).toFixed(1)}%` 
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>Est. payout if win</span>
+                <span className={cn(
+                  "font-medium",
+                  amount && Number(amount) > 0 && Number(formatUnits(simulatedPayout, DECIMALS.SHARES)) >= Number(amount)
+                    ? "text-emerald-500"
+                    : "text-rose-500"
+                )}>
+                  {simulatedPayout > 0n 
+                    ? `$${Number(formatUnits(simulatedPayout, DECIMALS.SHARES)).toFixed(2)}` 
+                    : '$0.00'} 
+                  {' '}
+                  ({amount && Number(amount) > 0 
+                    ? `${Number(formatUnits(simulatedPayout, DECIMALS.SHARES)) >= Number(amount) ? '+' : ''}${((Number(formatUnits(simulatedPayout, DECIMALS.SHARES)) / Number(amount) - 1) * 100).toFixed(0)}` 
+                    : '0'}%)
+                </span>
+              </div>
             </div>
-        </Tabs>
+          </div>
+
+          <div className="flex items-start gap-2 p-3 bg-amber-500/10 rounded-lg text-xs text-amber-600 dark:text-amber-400 border border-amber-500/20">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Bets are final</p>
+              <p className="text-amber-600/80 dark:text-amber-400/80 mt-0.5">
+                Once placed, bets cannot be sold or cancelled. Odds shown are indicative and may change as more bets are placed.
+              </p>
+            </div>
+          </div>
+
+          {hasAnyPosition && (
+            <div className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Your current bets
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {positionIndices.map(({ shares, idx }: { shares: bigint; idx: number }) => {
+                  const title = outcomeTitles[idx] ?? `Outcome ${idx + 1}`;
+                  const baseColor = getOutcomeColor(title, idx);
+                  return (
+                    <div 
+                      key={idx}
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs"
+                      style={{
+                        backgroundColor: `${baseColor}15`,
+                        borderColor: `${baseColor}30`,
+                        borderWidth: '1px',
+                      }}
+                    >
+                      <span className="text-muted-foreground">{title}:</span>
+                      <span className="font-mono font-medium" style={{ color: baseColor }}>
+                        ${parseFloat(formatUnits(shares, USDC.decimals)).toFixed(2)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

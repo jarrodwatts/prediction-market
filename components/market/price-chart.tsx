@@ -1,12 +1,5 @@
 "use client";
 
-/**
- * Price Chart Component
- *
- * Displays historical price data for market outcomes.
- * Adapted to use on-chain event logs.
- */
-
 import { useMemo, useState, type CSSProperties } from "react";
 import { Line, LineChart, XAxis, YAxis, CartesianGrid } from "recharts";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,11 +9,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { usePublicClient } from "wagmi";
-import { useQuery } from "@tanstack/react-query";
-import { parseAbiItem } from "viem";
-import { PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
-import { getPrice } from "@/lib/market-math";
+import { useMarketHistory } from "@/lib/hooks/use-markets";
 import { getOutcomeColor } from "@/lib/outcome-colors";
 import { formatDynamicChartDate, formatTooltipDate } from "@/lib/formatters";
 import { Loader2 } from "lucide-react";
@@ -36,39 +25,9 @@ interface PriceChartProps {
 
 export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0, outcomeTitles }: PriceChartProps) {
   const [timeFrame, setTimeFrame] = useState<TimeFrame>("all");
-  const client = usePublicClient();
 
-  const { data: chartData, isLoading } = useQuery({
-      queryKey: ['market-history', marketId.toString()],
-      queryFn: async () => {
-          if (!client) return [];
-          
-          const logs = await client.getLogs({
-              address: PREDICTION_MARKET_ADDRESS,
-              event: parseAbiItem('event MarketOutcomeShares(uint256 indexed marketId, uint256 timestamp, uint256[] outcomeShares, uint256 liquidity)'),
-              args: { marketId },
-              fromBlock: 'earliest'
-          });
-
-          return logs.map(log => {
-              const timestamp = Number(log.args.timestamp) * 1000;
-              const shares = log.args.outcomeShares!;
-              const liquidity = log.args.liquidity!;
-              
-              const prices: Record<string, number | string> = {
-                  time: timestamp, // Keep as number for sorting/filtering
-                  timestamp 
-              };
-
-              for (let i = 0; i < shares.length; i++) {
-                  prices[`outcome_${i}`] = getPrice(i, [...shares], liquidity);
-              }
-
-              return prices;
-          });
-      },
-      enabled: !!client
-  });
+  // Use centralized market history hook
+  const { data: chartData, isLoading } = useMarketHistory(marketId);
 
   // Filter data based on timeframe
   const filteredData = useMemo(() => {
@@ -93,7 +52,6 @@ export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0, outcom
               filtered.push({
                   ...lastPoint,
                   timestamp: now,
-                  time: now
               });
           }
       }
@@ -126,7 +84,7 @@ export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0, outcom
 
   const selectedKey = `outcome_${selectedOutcome}`;
   const selectedPct = hasData
-    ? Math.round(((filteredData[lastIdx]?.[selectedKey] as number) ?? 0) * 100)
+    ? Math.round((((filteredData[lastIdx] as Record<string, unknown>)?.[selectedKey] as number) ?? 0) * 100)
     : null;
 
   // Calculate the actual time span of displayed data for dynamic formatting
