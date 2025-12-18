@@ -245,6 +245,15 @@ export function useMarketHistory(marketId: bigint) {
     queryFn: async () => {
       if (!client) return []
 
+      // Fetch market data to get outcome count
+      const marketData = await client.readContract({
+        address: PREDICTION_MARKET_ADDRESS,
+        abi: PREDICTION_MARKET_ABI,
+        functionName: 'getMarketData',
+        args: [marketId],
+      })
+      const outcomeCount = Number(marketData[3])
+
       // Fetch BetPlaced events
       const logs = await client.getLogs({
         address: PREDICTION_MARKET_ADDRESS,
@@ -255,15 +264,42 @@ export function useMarketHistory(marketId: bigint) {
         fromBlock: 'earliest',
       })
 
-      return logs.map((log) => ({
-        timestamp: Number(log.args.timestamp) * 1000,
-        user: log.args.user,
-        outcomeId: Number(log.args.outcomeId),
-        amount: log.args.amount,
-        shares: log.args.shares,
-      }))
+      // Sort logs by timestamp
+      const sortedLogs = [...logs].sort((a, b) =>
+        Number(a.args.timestamp ?? 0n) - Number(b.args.timestamp ?? 0n)
+      )
+
+      // Build cumulative pool snapshots
+      const pools: bigint[] = Array(outcomeCount).fill(0n)
+      const chartData: Record<string, unknown>[] = []
+
+      for (const log of sortedLogs) {
+        const outcomeId = Number(log.args.outcomeId ?? 0)
+        const shares = log.args.shares ?? 0n
+        const timestamp = Number(log.args.timestamp ?? 0n) * 1000
+
+        // Update cumulative pools
+        pools[outcomeId] = (pools[outcomeId] ?? 0n) + shares
+
+        // Calculate total pot and prices
+        const totalPot = pools.reduce((sum, p) => sum + p, 0n)
+
+        // Create chart data point with outcome_X keys
+        const dataPoint: Record<string, unknown> = { timestamp }
+        for (let i = 0; i < outcomeCount; i++) {
+          const price = totalPot > 0n
+            ? Number(pools[i]) / Number(totalPot)
+            : 1 / outcomeCount
+          dataPoint[`outcome_${i}`] = price
+        }
+
+        chartData.push(dataPoint)
+      }
+
+      return chartData
     },
     enabled: !!client,
+    refetchInterval: 10_000,
   })
 }
 

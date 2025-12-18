@@ -10,9 +10,11 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
-import { useWriteContract, useWaitForTransactionReceipt, useReadContract, useAccount, useSendCalls, useCallsStatus } from 'wagmi'
+import { useWriteContract, useReadContract, useAccount, useSendCalls, useCallsStatus } from 'wagmi'
+import { waitForTransactionReceipt } from 'wagmi/actions'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatUnits, encodeFunctionData } from 'viem'
+import { config } from '@/lib/wagmi'
 import { useTwitchExtension } from '@/lib/use-twitch-extension'
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from '@/lib/contract'
 import { calcBuyAmount, getPrice } from '@/lib/market-math'
@@ -24,6 +26,7 @@ import { useCountdown, formatCountdown } from '@/lib/hooks/use-countdown'
 import { useUsdcBalance } from '@/lib/hooks/use-usdc-balance'
 import { INTERVALS, TRADING } from '@/lib/constants'
 import type { MarketApiResponse } from '@/lib/types'
+import { useMarketEvents, useWatchUserBets } from '@/lib/hooks/use-market-events'
 import { CheckCircle, Clock, DollarSign, Loader2, Lock, Trophy, Wallet } from 'lucide-react'
 
 // API Base URL for fetching market data
@@ -76,11 +79,11 @@ export default function OverlayPage() {
   const { address, isConnected } = useAccount()
   const queryClient = useQueryClient()
 
-  // Contract interactions
-  const { writeContract, data: hash, isPending: isWritePending, reset: resetWrite } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+  // Contract interactions - use async pattern for cleaner handling
+  const { writeContractAsync, isPending: isWritePending, reset: resetWrite } = useWriteContract()
+  const [isConfirming, setIsConfirming] = useState(false)
   
-  // Batched calls for approve + buy
+  // Batched calls for approve + buy (still needs Effect for status polling)
   const { sendCalls, data: batchCallsData, isPending: isBatchPending, reset: resetBatch } = useSendCalls()
   const batchId = typeof batchCallsData === 'string' ? batchCallsData : batchCallsData?.id
   const { data: batchStatus } = useCallsStatus({
@@ -96,12 +99,12 @@ export default function OverlayPage() {
   })
   const isBatchSuccess = batchStatus?.status === 'success'
 
-  // Track handled transactions
-  const handledHashRef = useRef<string | null>(null)
+  // Track handled batch transactions (single tx now handled via async/await)
   const handledBatchIdRef = useRef<string | null>(null)
   const isClaimTxRef = useRef(false)
 
   // Fetch active market using useQuery - replaces manual setInterval polling
+  // With WebSocket events, we can reduce polling frequency since events trigger instant updates
   const { data: market, isLoading: isLoadingMarket } = useQuery({
     queryKey: queryKeys.markets.active(effectiveChannelId || ''),
     queryFn: async () => {
@@ -118,7 +121,28 @@ export default function OverlayPage() {
       return res.json() as Promise<MarketApiResponse>
     },
     enabled: effectiveIsReady && !!effectiveChannelId,
-    refetchInterval: INTERVALS.OVERLAY_POLL,
+    // Reduced from 3s to 10s - WebSocket events handle real-time updates now
+    refetchInterval: INTERVALS.BALANCE_REFRESH,
+  })
+
+  // Real-time contract event subscriptions via WebSocket
+  // Automatically invalidates queries when events occur (no polling delay)
+  useMarketEvents({
+    marketId: market?.id ? BigInt(market.id) : undefined,
+    channelId: effectiveChannelId || undefined,
+    enabled: !isMockMode && !!market?.id,
+  })
+
+  // Watch for current user's bet confirmations for instant feedback
+  useWatchUserBets({
+    userAddress: address,
+    marketId: market?.id ? BigInt(market.id) : undefined,
+    onBetConfirmed: (sharesMinted) => {
+      // Instant success feedback when bet is confirmed on-chain
+      setTxSuccess(true)
+      setTimeout(() => setTxSuccess(false), 3_000)
+    },
+    enabled: !isMockMode && isConnected && !!address && !!market?.id,
   })
 
   // USDC Balance and Allowance - using centralized hook
@@ -184,15 +208,15 @@ export default function OverlayPage() {
   }, [amountValue, usdcAllowance])
 
   // Invalidate queries and reset state after success
-  const handleTxSuccess = useCallback(() => {
+  const handleTxSuccess = useCallback((isClaim = false) => {
     queryClient.invalidateQueries({ queryKey: queryKeys.markets.active(effectiveChannelId || '') })
     setTxSuccess(true)
     setAmount('')
     setSelectedOutcome(null)
+    setIsConfirming(false)
     
-    if (isClaimTxRef.current) {
+    if (isClaim) {
       setHasClaimed(true)
-      isClaimTxRef.current = false
       if (effectiveChannelId) {
         fetch(`${getApiBaseUrl()}/api/admin/clear-prediction`, {
           method: 'POST',
@@ -208,23 +232,16 @@ export default function OverlayPage() {
     resetBatch()
   }, [queryClient, effectiveChannelId, resetWrite, resetBatch])
 
-  // Handle single transaction success
-  useEffect(() => {
-    if (isSuccess && hash && hash !== handledHashRef.current) {
-      handledHashRef.current = hash
-      handleTxSuccess()
-    }
-  }, [isSuccess, hash, handleTxSuccess])
-
-  // Handle batch transaction success
+  // Handle batch transaction success (still needs Effect for polling-based status)
   useEffect(() => {
     if (isBatchSuccess && batchId && batchId !== handledBatchIdRef.current) {
       handledBatchIdRef.current = batchId
-      handleTxSuccess()
+      handleTxSuccess(isClaimTxRef.current)
+      isClaimTxRef.current = false
     }
   }, [isBatchSuccess, batchId, handleTxSuccess])
 
-  const handleBuy = useCallback(() => {
+  const handleBuy = useCallback(async () => {
     if (!amountValue || selectedOutcome === null || !market || !market.id) return
     
     try {
@@ -232,6 +249,7 @@ export default function OverlayPage() {
       const marketId = BigInt(market.id)
       
       if (needsApproval) {
+        // Batch calls - uses polling-based status, handled by Effect
         sendCalls({
           calls: [
             {
@@ -253,47 +271,67 @@ export default function OverlayPage() {
           ],
         })
       } else {
-        writeContract({
+        // Single tx - use async pattern for cleaner handling
+        const hash = await writeContractAsync({
           address: PREDICTION_MARKET_ADDRESS,
           abi: PREDICTION_MARKET_ABI,
           functionName: 'bet',
           args: [marketId, BigInt(selectedOutcome), amountBigInt],
         })
+        setIsConfirming(true)
+        await waitForTransactionReceipt(config, { hash })
+        handleTxSuccess()
       }
     } catch (e) {
       console.error('Error placing bet:', e)
+      setIsConfirming(false)
     }
-  }, [amountValue, selectedOutcome, market, needsApproval, sendCalls, writeContract])
+  }, [amountValue, selectedOutcome, market, needsApproval, sendCalls, writeContractAsync, handleTxSuccess])
 
-  const handleClaimWinnings = useCallback(() => {
+  const handleClaimWinnings = useCallback(async () => {
     if (!market?.id) return
-    isClaimTxRef.current = true
-    writeContract({
-      address: PREDICTION_MARKET_ADDRESS,
-      abi: PREDICTION_MARKET_ABI,
-      functionName: 'claimWinnings',
-      args: [BigInt(market.id)]
-    })
-  }, [market?.id, writeContract])
+    
+    try {
+      const hash = await writeContractAsync({
+        address: PREDICTION_MARKET_ADDRESS,
+        abi: PREDICTION_MARKET_ABI,
+        functionName: 'claimWinnings',
+        args: [BigInt(market.id)]
+      })
+      setIsConfirming(true)
+      await waitForTransactionReceipt(config, { hash })
+      handleTxSuccess(true) // isClaim = true
+    } catch (e) {
+      console.error('Error claiming winnings:', e)
+      setIsConfirming(false)
+    }
+  }, [market?.id, writeContractAsync, handleTxSuccess])
 
-  const handleClaimVoided = useCallback(() => {
+  const handleClaimVoided = useCallback(async () => {
     if (!market?.id || !userShares) return
-    isClaimTxRef.current = true
     const userOutcomeShares = userShares as readonly bigint[]
     
     // Find first outcome with shares to claim refund
     for (let i = 0; i < userOutcomeShares.length; i++) {
       if (userOutcomeShares[i] > 0n) {
-        writeContract({
-          address: PREDICTION_MARKET_ADDRESS,
-          abi: PREDICTION_MARKET_ABI,
-          functionName: 'claimRefund',
-          args: [BigInt(market.id), BigInt(i)]
-        })
+        try {
+          const hash = await writeContractAsync({
+            address: PREDICTION_MARKET_ADDRESS,
+            abi: PREDICTION_MARKET_ABI,
+            functionName: 'claimRefund',
+            args: [BigInt(market.id), BigInt(i)]
+          })
+          setIsConfirming(true)
+          await waitForTransactionReceipt(config, { hash })
+          handleTxSuccess(true) // isClaim = true
+        } catch (e) {
+          console.error('Error claiming refund:', e)
+          setIsConfirming(false)
+        }
         break
       }
     }
-  }, [market?.id, userShares, writeContract])
+  }, [market?.id, userShares, writeContractAsync, handleTxSuccess])
 
   // Handle quick amount button click
   const handleQuickAmount = (amt: number) => setAmount(amt.toString())
@@ -565,7 +603,7 @@ export default function OverlayPage() {
       <div className="p-4 space-y-4">
         {/* Outcome Selection */}
         <div className="space-y-2">
-          <label className="text-sm text-muted-foreground">Select outcome</label>
+          <label className="text-sm text-muted-foreground mb-1">Select outcome</label>
           <div className="space-y-2">
             {market.outcomes.map((outcome, idx) => {
               const price = outcomePrices[idx] || 0.5

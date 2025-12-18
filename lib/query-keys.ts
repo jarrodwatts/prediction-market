@@ -11,6 +11,7 @@ export const queryKeys = {
     list: () => [...queryKeys.markets.all, 'list'] as const,
     detail: (id: string) => [...queryKeys.markets.all, 'detail', id] as const,
     history: (id: string) => [...queryKeys.markets.all, 'history', id] as const,
+    trades: (id: string) => [...queryKeys.markets.all, 'trades', id] as const,
     active: (channelId: string) => [...queryKeys.markets.all, 'active', channelId] as const,
     meta: (marketId: string) => [...queryKeys.markets.all, 'meta', marketId] as const,
   },

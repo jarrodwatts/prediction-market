@@ -30,29 +30,12 @@ export const twitchChannelIdSchema = z
   .min(1, 'Channel ID is required')
 
 /**
- * BigInt string validation (for token amounts)
- */
-export const bigIntStringSchema = z
-  .string()
-  .regex(/^\d+$/, 'Amount must be a positive integer')
-  .refine((val) => BigInt(val) > 0n, 'Amount must be greater than 0')
-
-/**
  * Market ID validation
  */
 export const marketIdSchema = z
   .string()
   .regex(/^\d+$/, 'Invalid market ID')
   .transform((val) => BigInt(val))
-
-/**
- * Outcome index validation
- */
-export const outcomeIndexSchema = z
-  .number()
-  .int()
-  .min(0, 'Outcome index must be non-negative')
-  .max(31, 'Outcome index must be less than 32')
 
 /**
  * API Endpoint Schemas

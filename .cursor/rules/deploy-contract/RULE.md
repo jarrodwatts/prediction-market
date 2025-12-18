@@ -31,28 +31,34 @@ cd /home/jarrod/prediction-market/contracts && forge build --force
 
 ## Step 2: Deploy
 
+Set `PROTOCOL_TREASURY` to the address that receives protocol fees.
+
 **Testnet:**
 ```bash
 cd /home/jarrod/prediction-market/contracts && \
-WETH_ADDRESS=0x9EDCde0257F2386Ce177C3a7FCdd97787F0D841d forge script script/DeployPredictionMarket.s.sol \
+PROTOCOL_TREASURY=<YOUR_TREASURY_ADDRESS> \
+forge script script/DeployPredictionMarket.s.sol \
   --rpc-url https://api.testnet.abs.xyz \
   --account myKeystore \
   --broadcast \
   --verify \
   --verifier-url "https://api.etherscan.io/v2/api?chainid=11124" \
-  --etherscan-api-key MYUUIZ683YVHFH4P7UY6IV76QGI5K5P2AC
+  --etherscan-api-key MYUUIZ683YVHFH4P7UY6IV76QGI5K5P2AC \
+  --zksync
 ```
 
 **Mainnet:**
 ```bash
 cd /home/jarrod/prediction-market/contracts && \
-WETH_ADDRESS=0x3439153EB7AF838Ad19d56E1571FBD09333C2809 forge script script/DeployPredictionMarket.s.sol \
+PROTOCOL_TREASURY=<YOUR_TREASURY_ADDRESS> \
+forge script script/DeployPredictionMarket.s.sol \
   --rpc-url https://api.mainnet.abs.xyz \
   --account myKeystore \
   --broadcast \
   --verify \
   --verifier-url "https://api.etherscan.io/v2/api?chainid=2741" \
-  --etherscan-api-key MYUUIZ683YVHFH4P7UY6IV76QGI5K5P2AC
+  --etherscan-api-key MYUUIZ683YVHFH4P7UY6IV76QGI5K5P2AC \
+  --zksync
 ```
 
 > Note: User must run in terminal — keystore requires password input.
@@ -86,5 +92,6 @@ forge verify-contract <ADDRESS> src/PredictionMarket.sol:PredictionMarket \
 
 | Network | Address | Explorer |
 |---------|---------|----------|
-| Testnet | 0xcCfD5223e14D0A24aF2A80A6931c228F0a4137E0 | [abscan](https://sepolia.abscan.org/address/0xcCfD5223e14D0A24aF2A80A6931c228F0a4137E0) |
+| Testnet | 0xc4A86C66c597fc94C51D5cB79730E6e4fb2e2370 | [abscan](https://sepolia.abscan.org/address/0xc4A86C66c597fc94C51D5cB79730E6e4fb2e2370) |
+| Testnet MockUSDC | 0x5c0514d9f2Fc77822F5502E9DDae63383730E577 | [abscan](https://sepolia.abscan.org/address/0x5c0514d9f2Fc77822F5502E9DDae63383730E577) |
 | Mainnet | TBD | TBD |

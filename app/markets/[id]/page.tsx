@@ -17,6 +17,7 @@ import { PriceChart } from "@/components/market/price-chart";
 import { MarketRules } from "@/components/market/market-rules";
 import { MarketTimeline } from "@/components/market/market-timeline";
 import { TradePanel } from "@/components/market/trade-panel";
+import { TradesPanel } from "@/components/market/trades-panel";
 import { useMarket } from "@/lib/hooks/use-markets";
 
 export default function MarketDetailPage() {
@@ -135,6 +136,12 @@ export default function MarketDetailPage() {
           {/* Rules Section */}
           <MarketRules
             description={`Market Question: ${market.question}\n\nThis market will resolve based on the outcome of the event.`}
+          />
+
+          {/* Trades Feed */}
+          <TradesPanel
+            marketId={market.id}
+            outcomes={outcomeTitles}
           />
         </div>
 

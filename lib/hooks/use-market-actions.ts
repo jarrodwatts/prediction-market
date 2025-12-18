@@ -2,12 +2,17 @@
 
 /**
  * Market Action Hooks
+ * 
+ * Uses async/await pattern for single transactions (cleaner than Effects).
+ * Batch transactions still use Effect for polling-based status.
  */
 
-import { useCallback, useRef, useEffect } from 'react'
-import { useWriteContract, useWaitForTransactionReceipt, useSendCalls, useCallsStatus, useAccount } from 'wagmi'
+import { useCallback, useRef, useEffect, useState } from 'react'
+import { useWriteContract, useSendCalls, useCallsStatus, useAccount } from 'wagmi'
+import { waitForTransactionReceipt } from 'wagmi/actions'
 import { useQueryClient } from '@tanstack/react-query'
 import { encodeFunctionData } from 'viem'
+import { config } from '@/lib/wagmi'
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from '@/lib/contract'
 import { queryKeys } from '@/lib/query-keys'
 import { useTransactionToast } from '@/lib/use-transaction-toast'
@@ -28,10 +33,11 @@ export function useMarketAction(marketId: bigint, options?: MutationOptions) {
   const queryClient = useQueryClient()
   const txToast = useTransactionToast()
   
-  const { writeContract, data: hash, isPending: isWritePending, error: writeError, reset: resetWrite } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+  // Single transactions use async pattern (no Effects needed)
+  const { writeContractAsync, isPending: isWritePending, reset: resetWrite } = useWriteContract()
+  const [isConfirming, setIsConfirming] = useState(false)
   
-  // Batched calls for approve + action (AGW feature)
+  // Batched calls still use polling-based status (needs Effect)
   const { sendCalls, data: batchCallsData, isPending: isBatchPending, error: batchError, reset: resetBatch } = useSendCalls()
   const batchId = typeof batchCallsData === 'string' ? batchCallsData : batchCallsData?.id
   const { data: batchStatus } = useCallsStatus({
@@ -49,11 +55,9 @@ export function useMarketAction(marketId: bigint, options?: MutationOptions) {
   const isBatchFailed = batchStatus?.status === 'failure'
   const isBatchConfirming = !!batchId && batchStatus?.status === 'pending'
   
-  // Track current transaction type and prevent double handling
+  // Track batch transaction handling (single tx now handled via async/await)
   const txTypeRef = useRef<TxType | null>(null)
-  const handledHashRef = useRef<string | null>(null)
   const handledBatchIdRef = useRef<string | null>(null)
-  const handledErrorRef = useRef<Error | null>(null)
   const handledBatchErrorRef = useRef<Error | null>(null)
   const handledBatchFailureRef = useRef<string | null>(null)
   
@@ -75,22 +79,7 @@ export function useMarketAction(marketId: bigint, options?: MutationOptions) {
     }
   }, [queryClient, marketId, address])
   
-  // Handle single transaction success
-  useEffect(() => {
-    if (isSuccess && hash && hash !== handledHashRef.current) {
-      handledHashRef.current = hash
-      
-      if (txTypeRef.current) {
-        txToast.showSuccess(txTypeRef.current)
-        txTypeRef.current = null
-      }
-      
-      invalidateQueries()
-      options?.onSuccess?.()
-    }
-  }, [isSuccess, hash, txToast, invalidateQueries, options])
-  
-  // Handle batch transaction success
+  // Handle batch transaction success (still needs Effect for polling)
   useEffect(() => {
     if (isBatchSuccess && batchId && batchId !== handledBatchIdRef.current) {
       handledBatchIdRef.current = batchId
@@ -105,19 +94,7 @@ export function useMarketAction(marketId: bigint, options?: MutationOptions) {
     }
   }, [isBatchSuccess, batchId, txToast, invalidateQueries, options])
   
-  // Handle write errors
-  useEffect(() => {
-    if (writeError && writeError !== handledErrorRef.current) {
-      handledErrorRef.current = writeError
-      if (txTypeRef.current) {
-        txToast.showError(txTypeRef.current, writeError)
-        txTypeRef.current = null
-      }
-      options?.onError?.(writeError)
-    }
-  }, [writeError, txToast, options])
-  
-  // Handle batch errors
+  // Handle batch errors (still needs Effect for polling)
   useEffect(() => {
     if (batchError && batchError !== handledBatchErrorRef.current) {
       handledBatchErrorRef.current = batchError
@@ -129,7 +106,7 @@ export function useMarketAction(marketId: bigint, options?: MutationOptions) {
     }
   }, [batchError, txToast, options])
   
-  // Handle batch failure from status
+  // Handle batch failure from status (still needs Effect for polling)
   useEffect(() => {
     if (isBatchFailed && batchId && batchId !== handledBatchFailureRef.current) {
       handledBatchFailureRef.current = batchId
@@ -144,11 +121,10 @@ export function useMarketAction(marketId: bigint, options?: MutationOptions) {
   // Reset state for new transaction
   const reset = useCallback(() => {
     txTypeRef.current = null
-    handledHashRef.current = null
     handledBatchIdRef.current = null
-    handledErrorRef.current = null
     handledBatchErrorRef.current = null
     handledBatchFailureRef.current = null
+    setIsConfirming(false)
     resetWrite()
     resetBatch()
   }, [resetWrite, resetBatch])
@@ -156,20 +132,21 @@ export function useMarketAction(marketId: bigint, options?: MutationOptions) {
   /**
    * Place a bet on an outcome (final, cannot be cancelled)
    */
-  const bet = useCallback((
+  const bet = useCallback(async (
     outcomeId: number,
     amount: string,
     needsApproval: boolean,
     outcomeTitle?: string
   ) => {
     reset()
-    txTypeRef.current = 'bet'
     txToast.showPending('bet', `Betting $${amount} on ${outcomeTitle ?? `Outcome ${outcomeId + 1}`}`)
     
     try {
       const amountBigInt = parseUSDC(amount)
       
       if (needsApproval) {
+        // Batch calls - uses polling-based status, handled by Effect
+        txTypeRef.current = 'bet'
         sendCalls({
           calls: [
             {
@@ -191,83 +168,109 @@ export function useMarketAction(marketId: bigint, options?: MutationOptions) {
           ],
         })
       } else {
-        writeContract({
+        // Single tx - use async pattern for cleaner handling
+        const hash = await writeContractAsync({
           address: PREDICTION_MARKET_ADDRESS,
           abi: PREDICTION_MARKET_ABI,
           functionName: 'bet',
           args: [marketId, BigInt(outcomeId), amountBigInt],
         })
+        setIsConfirming(true)
+        await waitForTransactionReceipt(config, { hash })
+        setIsConfirming(false)
+        txToast.showSuccess('bet')
+        invalidateQueries()
+        options?.onSuccess?.()
       }
     } catch (e) {
+      setIsConfirming(false)
       txToast.showError('bet', e)
-      txTypeRef.current = null
+      options?.onError?.(e)
     }
-  }, [marketId, writeContract, sendCalls, txToast, reset])
+  }, [marketId, writeContractAsync, sendCalls, txToast, reset, invalidateQueries, options])
   
   /**
    * Claim winnings after market resolution.
    * Only callable if you bet on the winning outcome.
    */
-  const claimWinnings = useCallback(() => {
+  const claimWinnings = useCallback(async () => {
     reset()
-    txTypeRef.current = 'claimWinnings'
     txToast.showPending('claimWinnings')
     
     try {
-      writeContract({
+      const hash = await writeContractAsync({
         address: PREDICTION_MARKET_ADDRESS,
         abi: PREDICTION_MARKET_ABI,
         functionName: 'claimWinnings',
         args: [marketId],
       })
+      setIsConfirming(true)
+      await waitForTransactionReceipt(config, { hash })
+      setIsConfirming(false)
+      txToast.showSuccess('claimWinnings')
+      invalidateQueries()
+      options?.onSuccess?.()
     } catch (e) {
+      setIsConfirming(false)
       txToast.showError('claimWinnings', e)
-      txTypeRef.current = null
+      options?.onError?.(e)
     }
-  }, [marketId, writeContract, txToast, reset])
+  }, [marketId, writeContractAsync, txToast, reset, invalidateQueries, options])
   
   /**
    * Claim refund for a voided market.
    * Returns your original bet amount for the specified outcome.
    */
-  const claimRefund = useCallback((outcomeId: number) => {
+  const claimRefund = useCallback(async (outcomeId: number) => {
     reset()
-    txTypeRef.current = 'claimRefund'
     txToast.showPending('claimRefund', 'Claiming refund...')
     
     try {
-      writeContract({
+      const hash = await writeContractAsync({
         address: PREDICTION_MARKET_ADDRESS,
         abi: PREDICTION_MARKET_ABI,
         functionName: 'claimRefund',
         args: [marketId, BigInt(outcomeId)],
       })
+      setIsConfirming(true)
+      await waitForTransactionReceipt(config, { hash })
+      setIsConfirming(false)
+      txToast.showSuccess('claimRefund')
+      invalidateQueries()
+      options?.onSuccess?.()
     } catch (e) {
+      setIsConfirming(false)
       txToast.showError('claimRefund', e)
-      txTypeRef.current = null
+      options?.onError?.(e)
     }
-  }, [marketId, writeContract, txToast, reset])
+  }, [marketId, writeContractAsync, txToast, reset, invalidateQueries, options])
   
   /**
    * Approve USDC spending for the prediction market contract.
    */
-  const approve = useCallback(() => {
+  const approve = useCallback(async () => {
     reset()
-    txTypeRef.current = 'approve'
     txToast.showPending('approve')
     
     try {
-      writeContract({
+      const hash = await writeContractAsync({
         address: USDC.address,
         abi: ERC20_ABI,
         functionName: 'approve',
         args: [PREDICTION_MARKET_ADDRESS, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')],
       })
+      setIsConfirming(true)
+      await waitForTransactionReceipt(config, { hash })
+      setIsConfirming(false)
+      txToast.showSuccess('approve')
+      invalidateQueries()
+      options?.onSuccess?.()
     } catch (e) {
+      setIsConfirming(false)
       txToast.showError('approve', e)
-      txTypeRef.current = null
+      options?.onError?.(e)
     }
-  }, [writeContract, txToast, reset])
+  }, [writeContractAsync, txToast, reset, invalidateQueries, options])
   
   return {
     bet,

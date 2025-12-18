@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, DollarSign, Wallet, Coins, Lock, AlertTriangle } from "lucide-react";
+import { Loader2, DollarSign, Wallet, Coins, Lock } from "lucide-react";
 import { useReadContract, useAccount, usePublicClient } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
 import { formatUnits, parseAbiItem } from "viem";
@@ -14,10 +14,11 @@ import type { MarketData } from "@/lib/types";
 import { getOutcomeColor, getOutcomeClasses } from "@/lib/outcome-colors";
 import { cn } from "@/lib/utils";
 import { useMarketAction } from "@/lib/hooks/use-market-actions";
+import { useMarketEvents } from "@/lib/hooks/use-market-events";
 import { queryKeys } from "@/lib/query-keys";
 import { USDC, formatUSDC, parseUSDC } from "@/lib/tokens";
 import { useUsdcBalance } from "@/lib/hooks/use-usdc-balance";
-import { DECIMALS, TRADING } from "@/lib/constants";
+import { TRADING } from "@/lib/constants";
 
 interface TradePanelProps {
   market: MarketData;
@@ -45,11 +46,23 @@ export function TradePanel({
 
   const { balance: usdcBalance, allowance: usdcAllowance, balanceFormatted } = useUsdcBalance();
 
-  const { data: pools } = useReadContract({
+  const { data: pools, refetch: refetchPools } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
     functionName: 'getMarketPools',
     args: [market.id],
+    query: {
+      refetchInterval: 5_000,
+    },
+  });
+
+  // Real-time updates when any bet is placed
+  useMarketEvents({
+    marketId: market.id,
+    onBetPlaced: () => {
+      refetchPools();
+    },
+    enabled: true,
   });
 
   const { data: userSharesData } = useReadContract({
@@ -59,6 +72,7 @@ export function TradePanel({
     args: [market.id, address!],
     query: {
       enabled: isConnected && !!address,
+      refetchInterval: 5_000,
     }
   });
 
@@ -69,6 +83,7 @@ export function TradePanel({
     args: [market.id, address!],
     query: {
       enabled: isConnected && !!address,
+      refetchInterval: 5_000,
     }
   });
 
@@ -98,8 +113,8 @@ export function TradePanel({
     try {
       const val = parseUSDC(amount);
       if (val === 0n) return 0n;
-      const scaledVal = val * BigInt(10 ** 12);
-      return calcBuyAmount(scaledVal, selectedOutcome, [...outcomeShares], totalFeeBps);
+      // Keep in 6 decimals - pools from contract are also in 6 decimals (USDC)
+      return calcBuyAmount(val, selectedOutcome, [...outcomeShares], totalFeeBps);
     } catch {
       return 0n;
     }
@@ -416,7 +431,7 @@ export function TradePanel({
       <div className="p-4 sm:p-6 w-full">
         <div className="space-y-4">
           <div className="space-y-3">
-            <Label className="text-sm text-muted-foreground">Select outcome</Label>
+            <Label className="text-sm text-muted-foreground mb-1">Select outcome</Label>
             {!pricesLoaded ? (
               <div className="flex flex-col gap-2">
                 {Array.from({ length: market.outcomeCount }).map((_, idx) => (
@@ -515,38 +530,20 @@ export function TradePanel({
               <div className="flex justify-between text-muted-foreground">
                 <span>Current odds</span>
                 <span className="text-foreground">
-                  {outcomePrices[selectedOutcome] > 0 
-                    ? `${(outcomePrices[selectedOutcome] * 100).toFixed(1)}%` 
+                  {outcomePrices[selectedOutcome] > 0
+                    ? `${(outcomePrices[selectedOutcome] * 100).toFixed(1)}%`
                     : '-'}
                 </span>
               </div>
               <div className="flex justify-between text-muted-foreground">
-                <span>Est. payout if win</span>
-                <span className={cn(
-                  "font-medium",
-                  amount && Number(amount) > 0 && Number(formatUnits(simulatedPayout, DECIMALS.SHARES)) >= Number(amount)
-                    ? "text-emerald-500"
-                    : "text-rose-500"
-                )}>
-                  {simulatedPayout > 0n 
-                    ? `$${Number(formatUnits(simulatedPayout, DECIMALS.SHARES)).toFixed(2)}` 
-                    : '$0.00'} 
-                  {' '}
-                  ({amount && Number(amount) > 0 
-                    ? `${Number(formatUnits(simulatedPayout, DECIMALS.SHARES)) >= Number(amount) ? '+' : ''}${((Number(formatUnits(simulatedPayout, DECIMALS.SHARES)) / Number(amount) - 1) * 100).toFixed(0)}` 
-                    : '0'}%)
+                <span>Potential return</span>
+                <span className="font-medium text-foreground">
+                  {simulatedPayout > 0n && amount && Number(amount) > 0
+                    ? `$${Number(formatUnits(simulatedPayout, USDC.decimals)).toFixed(2)} (${(Number(formatUnits(simulatedPayout, USDC.decimals)) / Number(amount)).toFixed(2)}x)`
+                    : '-'}
                 </span>
               </div>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-2 p-3 bg-amber-500/10 rounded-lg text-xs text-amber-600 dark:text-amber-400 border border-amber-500/20">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium">Bets are final</p>
-              <p className="text-amber-600/80 dark:text-amber-400/80 mt-0.5">
-                Once placed, bets cannot be sold or cancelled. Odds shown are indicative and may change as more bets are placed.
-              </p>
+              <p className="text-xs text-muted-foreground/70">Final payout depends on total bets at resolution</p>
             </div>
           </div>
 

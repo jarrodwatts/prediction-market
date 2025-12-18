@@ -11,7 +11,11 @@ export const INTERVALS = {
   MARKET_POLL: 5_000,
   /** Balance refresh interval (ms) */
   BALANCE_REFRESH: 10_000,
-  /** Active market polling in overlay (ms) */
+  /** 
+   * Active market polling in overlay (ms)
+   * Note: With WebSocket events enabled, this is a fallback only.
+   * Real-time updates come via contract event subscriptions.
+   */
   OVERLAY_POLL: 3_000,
   /** Price history refresh interval (ms) */
   PRICE_HISTORY_POLL: 30_000,

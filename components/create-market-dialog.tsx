@@ -186,11 +186,14 @@ export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogPro
               id="question"
               placeholder="Will ETH hit $10k?"
               value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              aria-invalid={!!fieldErrors.question || !!currentErrors.question}
+              onChange={(e) => {
+                setQuestion(e.target.value)
+                if (fieldErrors.question) setFieldErrors(prev => ({ ...prev, question: undefined }))
+              }}
+              aria-invalid={!!fieldErrors.question}
             />
-            {(fieldErrors.question || currentErrors.question) && (
-              <p className="text-xs text-destructive">{fieldErrors.question || currentErrors.question}</p>
+            {fieldErrors.question && (
+              <p className="text-xs text-destructive">{fieldErrors.question}</p>
             )}
           </div>
           <div className="grid gap-2">
@@ -199,11 +202,14 @@ export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogPro
               id="image"
               placeholder="https://..."
               value={image}
-              onChange={(e) => setImage(e.target.value)}
-              aria-invalid={!!fieldErrors.image || !!currentErrors.image}
+              onChange={(e) => {
+                setImage(e.target.value)
+                if (fieldErrors.image) setFieldErrors(prev => ({ ...prev, image: undefined }))
+              }}
+              aria-invalid={!!fieldErrors.image}
             />
-            {(fieldErrors.image || currentErrors.image) && (
-              <p className="text-xs text-destructive">{fieldErrors.image || currentErrors.image}</p>
+            {fieldErrors.image && (
+              <p className="text-xs text-destructive">{fieldErrors.image}</p>
             )}
           </div>
           <div className="grid gap-2">
@@ -214,11 +220,14 @@ export function CreateMarketDialog({ open, onOpenChange }: CreateMarketDialogPro
               min="1"
               max="365"
               value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              aria-invalid={!!fieldErrors.duration || !!currentErrors.duration}
+              onChange={(e) => {
+                setDuration(e.target.value)
+                if (fieldErrors.duration) setFieldErrors(prev => ({ ...prev, duration: undefined }))
+              }}
+              aria-invalid={!!fieldErrors.duration}
             />
-            {(fieldErrors.duration || currentErrors.duration) && (
-              <p className="text-xs text-destructive">{fieldErrors.duration || currentErrors.duration}</p>
+            {fieldErrors.duration && (
+              <p className="text-xs text-destructive">{fieldErrors.duration}</p>
             )}
           </div>
         </div>

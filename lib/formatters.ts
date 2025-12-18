@@ -183,6 +183,25 @@ export function formatTooltipDate(timestamp: number): string {
 }
 
 /**
+ * Formats a timestamp as relative time (e.g., "2m ago", "1h ago").
+ * @param timestamp - Unix timestamp in seconds
+ */
+export function formatTimeAgo(timestamp: number): string {
+  const now = Math.floor(Date.now() / 1000);
+  const diff = now - timestamp;
+
+  if (diff < 0) return "just now";
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+
+  // More than a week: show the date
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/**
  * Truncates an Ethereum address for display.
  */
 export function truncateAddress(
