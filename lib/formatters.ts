@@ -3,6 +3,18 @@
  */
 
 /**
+ * Formats a number as currency with proper commas and decimal places.
+ */
+export function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+/**
  * Formats a number in compact notation (K, M, B suffixes).
  */
 export function formatCompact(

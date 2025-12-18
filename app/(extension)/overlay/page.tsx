@@ -4,29 +4,26 @@
  * Twitch Video Overlay - Betting UI
  * 
  * Overlay panel for placing bets on prediction markets using USDC.
- * Refactored to use TanStack Query for polling and cleaner patterns.
+ * Uses shared hooks for trading logic to stay consistent with the main market page.
  */
 
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
-import { useWriteContract, useReadContract, useAccount, useSendCalls, useCallsStatus } from 'wagmi'
-import { waitForTransactionReceipt } from 'wagmi/actions'
+import { useAccount } from 'wagmi'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { formatUnits, encodeFunctionData } from 'viem'
-import { config } from '@/lib/wagmi'
+import { formatUnits } from 'viem'
 import { useTwitchExtension } from '@/lib/use-twitch-extension'
-import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from '@/lib/contract'
-import { calcBuyAmount, getPrice } from '@/lib/market-math'
 import { getOutcomeColor, getOutcomeClasses } from '@/lib/outcome-colors'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/lib/query-keys'
-import { USDC, ERC20_ABI, parseUSDC } from '@/lib/tokens'
+import { USDC } from '@/lib/tokens'
 import { useCountdown, formatCountdown } from '@/lib/hooks/use-countdown'
-import { useUsdcBalance } from '@/lib/hooks/use-usdc-balance'
+import { useTradingPanel } from '@/lib/hooks/use-trading-panel'
+import { useMarketAction } from '@/lib/hooks/use-market-actions'
+import { useWatchUserBets } from '@/lib/hooks/use-market-events'
 import { INTERVALS, TRADING } from '@/lib/constants'
 import type { MarketApiResponse } from '@/lib/types'
-import { useMarketEvents, useWatchUserBets } from '@/lib/hooks/use-market-events'
 import { CheckCircle, Clock, DollarSign, Loader2, Lock, Trophy, Wallet } from 'lucide-react'
 
 // API Base URL for fetching market data
@@ -45,10 +42,10 @@ function getMockMarket(): MarketApiResponse {
     question: 'Will I beat this boss on the first try?',
     outcomes: ['Yes', 'No'],
     prices: [0.65, 0.35],
-    pools: ['650000000000000000000', '350000000000000000000'],
+    pools: ['650000000', '350000000'],
     state: 'open',
     closesAt: Math.floor(Date.now() / 1_000) + 300,
-    totalPot: '1000000000000000000000',
+    totalPot: '1000000000',
     protocolFeeBps: 100,
     creatorFeeBps: 100,
   }
@@ -79,32 +76,7 @@ export default function OverlayPage() {
   const { address, isConnected } = useAccount()
   const queryClient = useQueryClient()
 
-  // Contract interactions - use async pattern for cleaner handling
-  const { writeContractAsync, isPending: isWritePending, reset: resetWrite } = useWriteContract()
-  const [isConfirming, setIsConfirming] = useState(false)
-  
-  // Batched calls for approve + buy (still needs Effect for status polling)
-  const { sendCalls, data: batchCallsData, isPending: isBatchPending, reset: resetBatch } = useSendCalls()
-  const batchId = typeof batchCallsData === 'string' ? batchCallsData : batchCallsData?.id
-  const { data: batchStatus } = useCallsStatus({
-    id: batchId!,
-    query: { 
-      enabled: !!batchId,
-      refetchInterval: (query) => {
-        const status = query.state.data?.status
-        if (status === 'success' || status === 'failure') return false
-        return 1_000
-      },
-    },
-  })
-  const isBatchSuccess = batchStatus?.status === 'success'
-
-  // Track handled batch transactions (single tx now handled via async/await)
-  const handledBatchIdRef = useRef<string | null>(null)
-  const isClaimTxRef = useRef(false)
-
-  // Fetch active market using useQuery - replaces manual setInterval polling
-  // With WebSocket events, we can reduce polling frequency since events trigger instant updates
+  // Fetch active market using useQuery
   const { data: market, isLoading: isLoadingMarket } = useQuery({
     queryKey: queryKeys.markets.active(effectiveChannelId || ''),
     queryFn: async () => {
@@ -121,192 +93,74 @@ export default function OverlayPage() {
       return res.json() as Promise<MarketApiResponse>
     },
     enabled: effectiveIsReady && !!effectiveChannelId,
-    // Reduced from 3s to 10s - WebSocket events handle real-time updates now
     refetchInterval: INTERVALS.BALANCE_REFRESH,
   })
 
-  // Real-time contract event subscriptions via WebSocket
-  // Automatically invalidates queries when events occur (no polling delay)
-  useMarketEvents({
+  // Fee from API response (in basis points)
+  const totalFeeBps = BigInt((market?.protocolFeeBps ?? 0) + (market?.creatorFeeBps ?? 0))
+
+  // Shared trading panel hook - handles contract reads, calculations, and real-time updates
+  const {
+    pools,
+    userShares,
+    balanceFormatted,
+    outcomePrices,
+    estimatedPayout,
+    needsApproval,
+  } = useTradingPanel({
     marketId: market?.id ? BigInt(market.id) : undefined,
+    outcomeCount: market?.outcomes.length ?? 2,
+    totalFeeBps,
+    selectedOutcome,
+    amount,
     channelId: effectiveChannelId || undefined,
-    enabled: !isMockMode && !!market?.id,
+    enableEvents: !isMockMode && !!market?.id,
+  })
+
+  // Shared market action hook for transactions
+  const marketAction = useMarketAction(market?.id ? BigInt(market.id) : 0n, {
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.markets.active(effectiveChannelId || '') })
+      setTxSuccess(true)
+      setAmount('')
+      setSelectedOutcome(null)
+      setTimeout(() => setTxSuccess(false), 3_000)
+    },
   })
 
   // Watch for current user's bet confirmations for instant feedback
   useWatchUserBets({
     userAddress: address,
     marketId: market?.id ? BigInt(market.id) : undefined,
-    onBetConfirmed: (sharesMinted) => {
-      // Instant success feedback when bet is confirmed on-chain
+    onBetConfirmed: () => {
       setTxSuccess(true)
       setTimeout(() => setTxSuccess(false), 3_000)
     },
     enabled: !isMockMode && isConnected && !!address && !!market?.id,
   })
 
-  // USDC Balance and Allowance - using centralized hook
-  const { balance: usdcBalance, allowance: usdcAllowance, balanceFormatted } = useUsdcBalance()
+  // Handle buy action using shared hook
+  const handleBuy = useCallback(() => {
+    if (!amount || selectedOutcome === null || !market?.outcomes[selectedOutcome]) return
+    marketAction.bet(selectedOutcome, amount, needsApproval, market.outcomes[selectedOutcome])
+  }, [amount, selectedOutcome, market, needsApproval, marketAction])
 
-  // Get market pools
-  const { data: pools } = useReadContract({
-    address: PREDICTION_MARKET_ADDRESS,
-    abi: PREDICTION_MARKET_ABI,
-    functionName: 'getMarketPools',
-    args: [BigInt(market?.id || '0')],
-    query: { enabled: !!market?.id },
-  })
-
-  // Get user's shares
-  const { data: userShares } = useReadContract({
-    address: PREDICTION_MARKET_ADDRESS,
-    abi: PREDICTION_MARKET_ABI,
-    functionName: 'getUserShares',
-    args: [BigInt(market?.id || '0'), address!],
-    query: { enabled: !!market?.id && isConnected && !!address },
-  })
-
-  const outcomeShares = pools ?? []
-  // Fee from API response (in basis points)
-  const totalFeeBps = BigInt((market?.protocolFeeBps ?? 0) + (market?.creatorFeeBps ?? 0))
-
-  const outcomePrices = useMemo(() => {
-    if (!outcomeShares.length || !market) {
-      return market?.prices || [0.5, 0.5]
-    }
-    return Array.from({ length: market.outcomes.length }).map((_, i) => 
-      getPrice(i, [...outcomeShares])
-    )
-  }, [market, outcomeShares])
-
-  // Parse the amount input
-  const amountValue = useMemo(() => {
-    const parsed = parseFloat(amount)
-    return isNaN(parsed) || parsed <= 0 ? 0 : parsed
-  }, [amount])
-
-  // Calculate estimated payout
-  const estimatedShares = useMemo(() => {
-    if (!amountValue || selectedOutcome === null || !outcomeShares.length) return 0n
-    try {
-      const scaledAmount = parseUSDC(amountValue.toString()) * BigInt(10 ** 12)
-      return calcBuyAmount(scaledAmount, selectedOutcome, [...outcomeShares], totalFeeBps)
-    } catch {
-      return 0n
-    }
-  }, [amountValue, selectedOutcome, outcomeShares, totalFeeBps])
-
-  // Check if approval needed - derived state
-  const needsApproval = useMemo(() => {
-    if (!amountValue) return false
-    if (usdcAllowance === undefined) return true
-    try {
-      return usdcAllowance < parseUSDC(amountValue.toString())
-    } catch {
-      return true
-    }
-  }, [amountValue, usdcAllowance])
-
-  // Invalidate queries and reset state after success
-  const handleTxSuccess = useCallback((isClaim = false) => {
-    queryClient.invalidateQueries({ queryKey: queryKeys.markets.active(effectiveChannelId || '') })
-    setTxSuccess(true)
-    setAmount('')
-    setSelectedOutcome(null)
-    setIsConfirming(false)
-    
-    if (isClaim) {
-      setHasClaimed(true)
-      if (effectiveChannelId) {
-        fetch(`${getApiBaseUrl()}/api/admin/clear-prediction`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channelId: effectiveChannelId }),
-        }).catch(console.error)
-      }
-    } else {
-      setTimeout(() => setTxSuccess(false), 3_000)
-    }
-    
-    resetWrite()
-    resetBatch()
-  }, [queryClient, effectiveChannelId, resetWrite, resetBatch])
-
-  // Handle batch transaction success (still needs Effect for polling-based status)
-  useEffect(() => {
-    if (isBatchSuccess && batchId && batchId !== handledBatchIdRef.current) {
-      handledBatchIdRef.current = batchId
-      handleTxSuccess(isClaimTxRef.current)
-      isClaimTxRef.current = false
-    }
-  }, [isBatchSuccess, batchId, handleTxSuccess])
-
-  const handleBuy = useCallback(async () => {
-    if (!amountValue || selectedOutcome === null || !market || !market.id) return
-    
-    try {
-      const amountBigInt = parseUSDC(amountValue.toString())
-      const marketId = BigInt(market.id)
-      
-      if (needsApproval) {
-        // Batch calls - uses polling-based status, handled by Effect
-        sendCalls({
-          calls: [
-            {
-              to: USDC.address,
-              data: encodeFunctionData({
-                abi: ERC20_ABI,
-                functionName: 'approve',
-                args: [PREDICTION_MARKET_ADDRESS, amountBigInt],
-              }),
-            },
-            {
-              to: PREDICTION_MARKET_ADDRESS,
-              data: encodeFunctionData({
-                abi: PREDICTION_MARKET_ABI,
-                functionName: 'bet',
-                args: [marketId, BigInt(selectedOutcome), amountBigInt],
-              }),
-            },
-          ],
-        })
-      } else {
-        // Single tx - use async pattern for cleaner handling
-        const hash = await writeContractAsync({
-          address: PREDICTION_MARKET_ADDRESS,
-          abi: PREDICTION_MARKET_ABI,
-          functionName: 'bet',
-          args: [marketId, BigInt(selectedOutcome), amountBigInt],
-        })
-        setIsConfirming(true)
-        await waitForTransactionReceipt(config, { hash })
-        handleTxSuccess()
-      }
-    } catch (e) {
-      console.error('Error placing bet:', e)
-      setIsConfirming(false)
-    }
-  }, [amountValue, selectedOutcome, market, needsApproval, sendCalls, writeContractAsync, handleTxSuccess])
-
+  // Handle claim winnings
   const handleClaimWinnings = useCallback(async () => {
     if (!market?.id) return
-    
-    try {
-      const hash = await writeContractAsync({
-        address: PREDICTION_MARKET_ADDRESS,
-        abi: PREDICTION_MARKET_ABI,
-        functionName: 'claimWinnings',
-        args: [BigInt(market.id)]
-      })
-      setIsConfirming(true)
-      await waitForTransactionReceipt(config, { hash })
-      handleTxSuccess(true) // isClaim = true
-    } catch (e) {
-      console.error('Error claiming winnings:', e)
-      setIsConfirming(false)
+    await marketAction.claimWinnings()
+    setHasClaimed(true)
+    // Clear prediction mapping after claim
+    if (effectiveChannelId) {
+      fetch(`${getApiBaseUrl()}/api/admin/clear-prediction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: effectiveChannelId }),
+      }).catch(console.error)
     }
-  }, [market?.id, writeContractAsync, handleTxSuccess])
+  }, [market?.id, marketAction, effectiveChannelId])
 
+  // Handle claim refund for voided markets
   const handleClaimVoided = useCallback(async () => {
     if (!market?.id || !userShares) return
     const userOutcomeShares = userShares as readonly bigint[]
@@ -314,41 +168,29 @@ export default function OverlayPage() {
     // Find first outcome with shares to claim refund
     for (let i = 0; i < userOutcomeShares.length; i++) {
       if (userOutcomeShares[i] > 0n) {
-        try {
-          const hash = await writeContractAsync({
-            address: PREDICTION_MARKET_ADDRESS,
-            abi: PREDICTION_MARKET_ABI,
-            functionName: 'claimRefund',
-            args: [BigInt(market.id), BigInt(i)]
-          })
-          setIsConfirming(true)
-          await waitForTransactionReceipt(config, { hash })
-          handleTxSuccess(true) // isClaim = true
-        } catch (e) {
-          console.error('Error claiming refund:', e)
-          setIsConfirming(false)
+        await marketAction.claimRefund(i)
+        setHasClaimed(true)
+        // Clear prediction mapping after claim
+        if (effectiveChannelId) {
+          fetch(`${getApiBaseUrl()}/api/admin/clear-prediction`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channelId: effectiveChannelId }),
+          }).catch(console.error)
         }
         break
       }
     }
-  }, [market?.id, userShares, writeContractAsync, handleTxSuccess])
+  }, [market?.id, userShares, marketAction, effectiveChannelId])
 
   // Handle quick amount button click
   const handleQuickAmount = (amt: number) => setAmount(amt.toString())
-
-  // Handle percentage of balance click
-  const handlePercentage = (pct: number) => {
-    if (!usdcBalance) return
-    const bal = balanceFormatted
-    const newAmount = Math.floor(bal * pct * 100) / 100
-    setAmount(newAmount.toString())
-  }
 
   // Countdown timer
   const remainingSeconds = useCountdown(market?.closesAt ?? null)
   const timeRemaining = !market?.closesAt ? null : remainingSeconds <= 0 ? 'Closed' : formatCountdown(remainingSeconds)
 
-  const isLoading = isWritePending || isBatchPending || isConfirming
+  const isLoading = marketAction.isLoading
   
   // Check market state
   const isTimePassed = remainingSeconds <= 0
@@ -356,11 +198,15 @@ export default function OverlayPage() {
   const isMarketResolved = market?.state === 'resolved'
   const isMarketPending = market?.state === 'pending'
 
-  // Calculate order summary values
-  const pricePerShare = selectedOutcome !== null ? outcomePrices[selectedOutcome] : 0
-  const estShares = Number(formatUnits(estimatedShares, 18))
-  const potentialReturn = estShares
-  const potentialReturnPct = amountValue > 0 ? ((potentialReturn / amountValue - 1) * 100) : 0
+  // Calculate order summary values - use USDC decimals (6), not 18
+  const amountValue = useMemo(() => {
+    const parsed = parseFloat(amount)
+    return isNaN(parsed) || parsed <= 0 ? 0 : parsed
+  }, [amount])
+  
+  const pricePerShare = selectedOutcome !== null ? (outcomePrices[selectedOutcome] ?? 0) : 0
+  const estPayoutFormatted = Number(formatUnits(estimatedPayout, USDC.decimals))
+  const potentialReturnPct = amountValue > 0 ? ((estPayoutFormatted / amountValue - 1) * 100) : 0
 
   const getUserOutcomeShares = (): readonly bigint[] | undefined => {
     if (!userShares) return undefined
@@ -376,8 +222,9 @@ export default function OverlayPage() {
     </div>
   )
 
-  // Loading state
-  if (isLoadingMarket && !isMockMode) {
+  // Loading state - only show spinner on initial load when no cached data exists
+  // This implements "stale-while-revalidate" pattern for smoother UX
+  if (isLoadingMarket && !market && !isMockMode) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-card p-4">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -511,7 +358,12 @@ export default function OverlayPage() {
               <button
                 onClick={handleClaimVoided}
                 disabled={isLoading}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                className={cn(
+                  "flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold transition-all disabled:cursor-not-allowed",
+                  isLoading 
+                    ? "bg-muted text-muted-foreground" 
+                    : "bg-primary text-primary-foreground hover:bg-primary/90"
+                )}
               >
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
                 Reclaim Funds
@@ -557,7 +409,12 @@ export default function OverlayPage() {
             <button
               onClick={handleClaimWinnings}
               disabled={isLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+              className={cn(
+                "flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold transition-all disabled:cursor-not-allowed",
+                isLoading
+                  ? "bg-muted text-muted-foreground"
+                  : "bg-emerald-600 text-white hover:bg-emerald-500"
+              )}
             >
               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
               Claim Winnings
@@ -642,7 +499,12 @@ export default function OverlayPage() {
           <button
             onClick={login}
             disabled={isWalletLoading}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className={cn(
+              "flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold transition-all disabled:cursor-not-allowed",
+              isWalletLoading
+                ? "bg-muted text-muted-foreground"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
+            )}
           >
             {isWalletLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
             Connect Wallet
@@ -687,19 +549,6 @@ export default function OverlayPage() {
                   </button>
                 ))}
               </div>
-
-              {/* Percentage buttons */}
-              <div className="flex gap-2">
-                {[0.25, 0.5, 1].map((pct) => (
-                  <button
-                    key={pct}
-                    onClick={() => handlePercentage(pct)}
-                    className="flex-1 rounded-md border border-border bg-muted/30 py-1.5 text-sm font-medium text-foreground hover:bg-muted/50"
-                  >
-                    {pct * 100}%
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Buy Button */}
@@ -707,16 +556,18 @@ export default function OverlayPage() {
               onClick={handleBuy}
               disabled={!amountValue || selectedOutcome === null || isLoading}
               className={cn(
-                'flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold text-white transition-all disabled:cursor-not-allowed disabled:opacity-50',
-                selectedOutcome === 0 ? 'bg-emerald-600 hover:bg-emerald-500' : 
-                selectedOutcome === 1 ? 'bg-rose-600 hover:bg-rose-500' : 
-                'bg-primary'
+                'flex w-full items-center justify-center gap-2 rounded-lg py-3 font-semibold transition-all disabled:cursor-not-allowed',
+                (!amountValue || selectedOutcome === null || isLoading)
+                  ? 'bg-muted text-muted-foreground opacity-100' // Explicitly set muted colors for better contrast
+                  : (selectedOutcome === 0 ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 
+                     selectedOutcome === 1 ? 'bg-rose-600 hover:bg-rose-500 text-white' : 
+                     'bg-primary text-primary-foreground')
               )}
             >
               {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {isConfirming ? 'Confirming...' : 'Placing bet...'}
+                  Placing bet...
                 </>
               ) : txSuccess ? (
                 'Bet Placed!'
@@ -734,7 +585,7 @@ export default function OverlayPage() {
               <div className="flex justify-between text-muted-foreground">
                 <span>Est. payout if win</span>
                 <span className={cn("font-medium", potentialReturnPct >= 0 ? "text-emerald-500" : "text-rose-500")}>
-                  ${potentialReturn.toFixed(2)} ({potentialReturnPct >= 0 ? '+' : ''}{potentialReturnPct.toFixed(0)}%)
+                  ${estPayoutFormatted.toFixed(2)} ({potentialReturnPct >= 0 ? '+' : ''}{potentialReturnPct.toFixed(0)}%)
                 </span>
               </div>
             </div>

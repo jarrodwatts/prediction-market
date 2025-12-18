@@ -9,9 +9,11 @@ const TWITCH_TOKEN_URL = 'https://id.twitch.tv/oauth2/token'
 const TWITCH_USERS_URL = 'https://api.twitch.tv/helix/users'
 
 type EventSubSubscription = {
+  id?: string
   type?: string
   status?: string
   condition?: { broadcaster_user_id?: string }
+  transport?: { method?: string; callback?: string }
 }
 
 type EventSubListResponse = {
@@ -183,22 +185,56 @@ export async function POST(request: NextRequest) {
           sub.status === 'enabled'
       ) || []
     
-    const existingTypes = new Set(
-      existingSubscriptions.map((sub) => sub.type).filter(Boolean) as string[]
-    )
-    console.log(`📋 Found ${existingSubscriptions.length} existing subscriptions:`, Array.from(existingTypes))
+    // Build map of type -> subscription (to check callback URL)
+    const existingSubsByType = new Map<string, EventSubSubscription>()
+    for (const sub of existingSubscriptions) {
+      if (sub.type) {
+        existingSubsByType.set(sub.type, sub)
+      }
+    }
+    console.log(`📋 Found ${existingSubscriptions.length} existing subscriptions:`, Array.from(existingSubsByType.keys()))
 
     const results: Array<
-      | { type: string; success: true; id?: string; skipped?: boolean }
+      | { type: string; success: true; id?: string; skipped?: boolean; refreshed?: boolean }
       | { type: string; success: false; status?: number; error?: string; details?: unknown }
     > = []
 
     for (const type of eventTypes) {
-      // Skip if subscription already exists
-      if (existingTypes.has(type)) {
-        console.log(`⏭️ Already subscribed to ${type}, skipping`)
-        results.push({ type, success: true, skipped: true })
-        continue
+      const existingSub = existingSubsByType.get(type)
+      
+      // Check if subscription exists with CORRECT callback URL
+      if (existingSub) {
+        const existingCallback = existingSub.transport?.callback
+        if (existingCallback === webhookUrl) {
+          console.log(`⏭️ Already subscribed to ${type} with correct URL, skipping`)
+          results.push({ type, success: true, skipped: true })
+          continue
+        }
+        
+        // Subscription exists but with WRONG callback URL - delete it first
+        console.log(`🔄 Subscription ${type} has stale callback URL: ${existingCallback}`)
+        console.log(`   Expected: ${webhookUrl}`)
+        console.log(`   Deleting old subscription ${existingSub.id}...`)
+        
+        try {
+          const deleteResponse = await fetch(`${TWITCH_API_URL}?id=${existingSub.id}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${appAccessToken}`,
+              'Client-Id': clientId,
+            },
+          })
+          
+          if (deleteResponse.ok || deleteResponse.status === 204) {
+            console.log(`✅ Deleted stale subscription ${existingSub.id}`)
+          } else {
+            console.error(`⚠️ Failed to delete stale subscription: ${deleteResponse.status}`)
+            // Continue anyway - we'll try to create and it might 409
+          }
+        } catch (e) {
+          console.error(`⚠️ Error deleting stale subscription:`, e)
+          // Continue anyway
+        }
       }
       
       try {
@@ -226,8 +262,9 @@ export async function POST(request: NextRequest) {
         const data = (await response.json()) as EventSubCreateResponse
         
         if (response.ok) {
-          console.log(`✅ Subscribed to ${type}`)
-          results.push({ type, success: true, id: data.data?.[0]?.id })
+          const wasRefreshed = !!existingSub
+          console.log(`✅ ${wasRefreshed ? 'Refreshed' : 'Subscribed to'} ${type}`)
+          results.push({ type, success: true, id: data.data?.[0]?.id, refreshed: wasRefreshed })
         } else if (response.status === 409) {
           // Subscription already exists (race condition)
           console.log(`⏭️ ${type} already exists (409), skipping`)
@@ -268,10 +305,18 @@ export async function POST(request: NextRequest) {
     })
 
     const successCount = results.filter(r => r.success).length
+    const refreshedCount = results.filter(r => r.success && 'refreshed' in r && r.refreshed).length
+    const skippedCount = results.filter(r => r.success && 'skipped' in r && r.skipped).length
+    const newCount = successCount - refreshedCount - skippedCount
+    
+    let message = `Subscribed to ${successCount}/${eventTypes.length} events`
+    if (refreshedCount > 0) {
+      message += ` (${refreshedCount} refreshed with new URL)`
+    }
     
     return NextResponse.json({
       success: successCount > 0,
-      message: `Subscribed to ${successCount}/${eventTypes.length} events`,
+      message,
       results,
       webhookUrl,
       troubleshooting:

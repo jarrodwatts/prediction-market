@@ -9,15 +9,13 @@ import { useReadContract, useAccount, usePublicClient } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
 import { formatUnits, parseAbiItem } from "viem";
 import { PREDICTION_MARKET_ABI, PREDICTION_MARKET_ADDRESS } from "@/lib/contract";
-import { calcBuyAmount, getPrice } from "@/lib/market-math";
 import type { MarketData } from "@/lib/types";
 import { getOutcomeColor, getOutcomeClasses } from "@/lib/outcome-colors";
 import { cn } from "@/lib/utils";
 import { useMarketAction } from "@/lib/hooks/use-market-actions";
-import { useMarketEvents } from "@/lib/hooks/use-market-events";
+import { useTradingPanel } from "@/lib/hooks/use-trading-panel";
 import { queryKeys } from "@/lib/query-keys";
-import { USDC, formatUSDC, parseUSDC } from "@/lib/tokens";
-import { useUsdcBalance } from "@/lib/hooks/use-usdc-balance";
+import { USDC, formatUSDC } from "@/lib/tokens";
 import { TRADING } from "@/lib/constants";
 
 interface TradePanelProps {
@@ -38,44 +36,36 @@ export function TradePanel({
   const { address, isConnected } = useAccount();
   const publicClient = usePublicClient();
 
+  const totalFeeBps = BigInt(market.protocolFeeBps + market.creatorFeeBps);
+
+  // Shared trading panel hook for contract reads and calculations
+  const {
+    pools,
+    userShares,
+    usdcBalance,
+    balanceFormatted,
+    outcomePrices,
+    estimatedPayout: simulatedPayout,
+    needsApproval,
+    hasAnyPosition,
+    positionsByOutcome: positionIndices,
+    isLoadingPools,
+  } = useTradingPanel({
+    marketId: market.id,
+    outcomeCount: market.outcomeCount,
+    totalFeeBps,
+    selectedOutcome,
+    amount,
+    enableEvents: true,
+  });
+
   const marketAction = useMarketAction(market.id, {
     onSuccess: () => {
       setAmount("");
     },
   });
 
-  const { balance: usdcBalance, allowance: usdcAllowance, balanceFormatted } = useUsdcBalance();
-
-  const { data: pools, refetch: refetchPools } = useReadContract({
-    address: PREDICTION_MARKET_ADDRESS,
-    abi: PREDICTION_MARKET_ABI,
-    functionName: 'getMarketPools',
-    args: [market.id],
-    query: {
-      refetchInterval: 5_000,
-    },
-  });
-
-  // Real-time updates when any bet is placed
-  useMarketEvents({
-    marketId: market.id,
-    onBetPlaced: () => {
-      refetchPools();
-    },
-    enabled: true,
-  });
-
-  const { data: userSharesData } = useReadContract({
-    address: PREDICTION_MARKET_ADDRESS,
-    abi: PREDICTION_MARKET_ABI,
-    functionName: 'getUserShares',
-    args: [market.id, address!],
-    query: {
-      enabled: isConnected && !!address,
-      refetchInterval: 5_000,
-    }
-  });
-
+  // Claimable amount (specific to resolved markets - not in shared hook)
   const { data: claimableData } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
@@ -87,47 +77,14 @@ export function TradePanel({
     }
   });
 
-  const needsApproval = useMemo(() => {
-    if (!amount || usdcAllowance === undefined) return false;
-    try {
-      const amountBigInt = parseUSDC(amount);
-      return usdcAllowance < amountBigInt;
-    } catch {
-      return false;
-    }
-  }, [amount, usdcAllowance]);
-
-  const outcomeShares = pools ?? [];
-  const totalFeeBps = BigInt(market.protocolFeeBps + market.creatorFeeBps);
-  const userOutcomeShares = userSharesData ?? [];
-  const hasAnyPosition = userOutcomeShares.some((s: bigint) => s > 0n);
-  const positionIndices = userOutcomeShares
-    .map((shares: bigint, idx: number) => ({ shares, idx }))
-    .filter(({ shares }: { shares: bigint }) => shares > 0n);
-
+  const userOutcomeShares = userShares ?? [];
   const claimableAmount = claimableData ? claimableData[0] : 0n;
   const canClaim = claimableData ? claimableData[1] : false;
 
-  const simulatedPayout = useMemo(() => {
-    if (!outcomeShares.length || !amount) return 0n;
-    try {
-      const val = parseUSDC(amount);
-      if (val === 0n) return 0n;
-      // Keep in 6 decimals - pools from contract are also in 6 decimals (USDC)
-      return calcBuyAmount(val, selectedOutcome, [...outcomeShares], totalFeeBps);
-    } catch {
-      return 0n;
-    }
-  }, [amount, selectedOutcome, outcomeShares, totalFeeBps]);
-
-  const outcomePrices = useMemo(() => {
-    if (!outcomeShares.length) return Array(market.outcomeCount).fill(0);
-    return Array.from({ length: market.outcomeCount }).map((_, i) => 
-      getPrice(i, [...outcomeShares])
-    );
-  }, [market.outcomeCount, outcomeShares]);
-
-  const pricesLoaded = outcomeShares.length > 0;
+  // Only show skeleton on initial load when no pools data exists
+  // During background refetches, pools maintains its previous value (SWR pattern)
+  const pricesLoaded = (pools?.length ?? 0) > 0;
+  const showOutcomeSkeleton = !pricesLoaded && isLoadingPools;
 
   const outcomeTitles = market.outcomes && market.outcomes.length === market.outcomeCount
     ? market.outcomes
@@ -385,7 +342,12 @@ export function TradePanel({
                   <Button 
                     onClick={handleClaimWinnings}
                     disabled={marketAction.isLoading}
-                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
+                    className={cn(
+                      "w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]",
+                      marketAction.isLoading
+                        ? "bg-muted text-muted-foreground opacity-100 cursor-not-allowed"
+                        : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    )}
                   >
                     {marketAction.isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
                     Claim Winnings
@@ -396,7 +358,10 @@ export function TradePanel({
                   <Button 
                     onClick={handleClaimRefund}
                     disabled={marketAction.isLoading}
-                    className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]"
+                    className={cn(
+                      "w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]",
+                      marketAction.isLoading && "bg-muted text-muted-foreground opacity-100 cursor-not-allowed"
+                    )}
                   >
                     {marketAction.isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Coins className="mr-2 h-5 w-5" />}
                     Reclaim Funds
@@ -432,7 +397,7 @@ export function TradePanel({
         <div className="space-y-4">
           <div className="space-y-3">
             <Label className="text-sm text-muted-foreground mb-1">Select outcome</Label>
-            {!pricesLoaded ? (
+            {showOutcomeSkeleton ? (
               <div className="flex flex-col gap-2">
                 {Array.from({ length: market.outcomeCount }).map((_, idx) => (
                   <div key={idx} className="h-12 rounded-lg border border-border bg-card/50 animate-pulse" />
@@ -515,7 +480,12 @@ export function TradePanel({
 
           <div className="space-y-3 pt-0">
             <Button 
-              className="w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02] bg-emerald-600 hover:bg-emerald-500 text-white"
+              className={cn(
+                "w-full h-11 text-base font-semibold shadow-lg transition-all hover:scale-[1.02]",
+                (marketAction.isLoading || !amount)
+                  ? "bg-muted text-muted-foreground opacity-100 cursor-not-allowed"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white"
+              )}
               onClick={handleBet} 
               disabled={marketAction.isLoading || !amount}
             >

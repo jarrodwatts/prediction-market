@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Allow dev requests from tunnel URLs (Cloudflare, ngrok)
+  allowedDevOrigins: [
+    'https://*.trycloudflare.com',
+    'https://*.ngrok-free.app',
+    'https://*.ngrok.io',
+  ],
   images: {
     remotePatterns: [
       {
@@ -16,6 +22,22 @@ const nextConfig: NextConfig = {
         hostname: "*",
       },
     ],
+  },
+  // Headers for Twitch extension compatibility
+  async headers() {
+    return [
+      {
+        // Apply to extension routes
+        source: "/(overlay|ext-config)",
+        headers: [
+          {
+            // Allow Twitch to iframe these pages
+            key: "Content-Security-Policy",
+            value: "frame-ancestors https://*.twitch.tv https://*.ext-twitch.tv https://localhost",
+          },
+        ],
+      },
+    ];
   },
   // Extension static export configuration
   // When EXPORT_EXTENSION=true, build only extension pages as static files

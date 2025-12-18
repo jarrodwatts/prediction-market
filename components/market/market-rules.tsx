@@ -16,7 +16,7 @@ interface MarketRulesProps {
 
 export function MarketRules({
   description,
-  defaultExpanded = true,
+  defaultExpanded = false,
 }: MarketRulesProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 

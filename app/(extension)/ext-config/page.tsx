@@ -2,386 +2,100 @@
 
 /**
  * Twitch Extension Config Page
- * 
- * Configuration page for streamers to set up the prediction market extension.
- * This runs within the Twitch Extension Config view (not on our main site).
+ *
+ * Setup page for streamers accessed from within Twitch's extension iframe.
+ * Uses popup-based OAuth since redirects don't work in iframes.
  */
 
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useCallback } from 'react'
+import { useSession } from 'next-auth/react'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
 import { useTwitchExtension } from '@/lib/use-twitch-extension'
-import { CheckCircle, Wallet, Twitch, ExternalLink, Loader2, AlertCircle, DollarSign, BarChart3, Users } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { parseError } from '@/lib/errors'
-
-// API Base URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || ''
-
-interface StreamerStatus {
-  isRegistered: boolean
-  hasWallet: boolean
-  hasSubscriptions: boolean
-  walletAddress?: string
-}
-
-interface StreamerStats {
-  totalMarkets: number
-  totalVolume: number
-  totalFees: number
-  activeBettors: number
-}
+import { StreamerSetup } from '@/components/streamer/streamer-setup'
+import { useStreamerSetup } from '@/lib/hooks/use-streamer-setup'
+import { openOAuthPopup, getTwitchSignInUrl } from '@/lib/oauth-popup'
+import { Loader2 } from 'lucide-react'
 
 export default function ExtConfigPage() {
-  const [saveSuccess, setSaveSuccess] = useState(false)
-  const queryClient = useQueryClient()
+  const [isOAuthLoading, setIsOAuthLoading] = useState(false)
 
-  // Twitch extension context
-  const { isReady, channelId, token, setBroadcasterConfig } = useTwitchExtension()
+  // Twitch extension context - gives us channelId
+  const { isReady, isError, error: extensionError, channelId: extensionChannelId } = useTwitchExtension()
+
+  // NextAuth session - needed for OAuth/EventSub permissions
+  const { data: session, update: updateSession } = useSession()
 
   // Wallet connection
   const { login } = useLoginWithAbstract()
   const { data: abstractClient, isLoading: isWalletLoading } = useAbstractClient()
-  const walletAddress = abstractClient?.account?.address
 
-  // Fetch streamer status using TanStack Query
-  const { 
-    data: status, 
-    isLoading, 
-    error: statusError 
-  } = useQuery({
-    queryKey: ['streamer-status', channelId],
-    queryFn: async (): Promise<StreamerStatus> => {
-      const res = await fetch(`${API_BASE_URL}/api/streamer/status?channelId=${channelId}`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-      })
-      
-      if (res.ok) {
-        return res.json()
-      }
-      
-      return {
-        isRegistered: false,
-        hasWallet: false,
-        hasSubscriptions: false,
-      }
-    },
-    enabled: isReady && !!channelId,
+  const walletAddress = abstractClient?.account?.address ?? null
+
+  // Use session's twitchId for subscriptions (requires OAuth),
+  // fall back to extension channelId for display purposes
+  const channelId = session?.twitchId ?? extensionChannelId ?? null
+
+  const { subscriptionStatus, retry } = useStreamerSetup({
+    channelId: session?.twitchId ?? null, // Only use OAuth'd channelId for subscriptions
+    walletAddress,
   })
 
-  // Fetch stats using TanStack Query (only when registered)
-  const { data: stats } = useQuery({
-    queryKey: ['streamer-stats', channelId],
-    queryFn: async (): Promise<StreamerStats | null> => {
-      const res = await fetch(`${API_BASE_URL}/api/streamer/stats?channelId=${channelId}`)
-      if (res.ok) {
-        return res.json()
-      }
-      return null
-    },
-    enabled: !!status?.isRegistered && !!channelId,
-  })
+  // Handle Twitch OAuth via popup (required for iframe context)
+  const handleTwitchConnect = useCallback(() => {
+    setIsOAuthLoading(true)
 
-  // Derive error from query
-  const error = statusError ? 'Failed to check registration status' : null
+    openOAuthPopup({
+      url: getTwitchSignInUrl(),
+      onSuccess: () => {
+        // Refresh the session to pick up new auth
+        updateSession()
+        setIsOAuthLoading(false)
+      },
+      onError: (error) => {
+        console.error('OAuth popup error:', error)
+        setIsOAuthLoading(false)
+      },
+    })
+  }, [updateSession])
 
-  // Setup mutation using TanStack Query
-  const setupMutation = useMutation({
-    mutationFn: async () => {
-      if (!walletAddress || !channelId) {
-        throw new Error('Missing wallet address or channel ID')
-      }
-
-      const settingsRes = await fetch(`${API_BASE_URL}/api/streamer/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          channelId,
-          walletAddress,
-        }),
-      })
-
-      if (!settingsRes.ok) {
-        throw new Error('Failed to save wallet address')
-      }
-
-      return { walletAddress }
-    },
-    onSuccess: ({ walletAddress: savedAddress }) => {
-      // Save config to Twitch's broadcaster config
-      setBroadcasterConfig(JSON.stringify({
-        walletAddress: savedAddress,
-        setupAt: Date.now(),
-      }))
-
-      // Invalidate status query to refetch
-      queryClient.invalidateQueries({ queryKey: ['streamer-status', channelId] })
-
-      setSaveSuccess(true)
-      setTimeout(() => setSaveSuccess(false), 3_000)
-    },
-  })
-
-  // Handler for setup button
-  const handleSetup = () => {
-    setupMutation.mutate()
+  // Show loading state while extension initializes
+  if (!isReady && !isError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Connecting to Twitch...</p>
+        </div>
+      </div>
+    )
   }
 
-  // Derive mutation state
-  const isSaving = setupMutation.isPending
-  const setupError = setupMutation.error 
-    ? parseError(setupMutation.error, 'streamerSetup')
-    : null
-
-  // Determine current setup step
-  const currentStep = !status?.hasWallet ? 1 : !status?.hasSubscriptions ? 2 : 3
-
-  if (isLoading) {
+  // Show error if extension failed to load
+  if (isError) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#0f0f1a] via-[#1a1a2e] to-[#0f0f1a] flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-purple-500 mx-auto mb-4" />
-          <p className="text-white/60">Loading...</p>
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="text-center space-y-4 max-w-md">
+          <p className="text-destructive font-medium">Failed to load extension</p>
+          <p className="text-sm text-muted-foreground">
+            {extensionError || 'Please make sure you are viewing this page within the Twitch extension.'}
+          </p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0f0f1a] via-[#1a1a2e] to-[#0f0f1a] p-6">
-      <div className="max-w-lg mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-white mb-2">
-            🎯 Prediction Market Setup
-          </h1>
-          <p className="text-white/60 text-sm">
-            Let your viewers bet real USDC on your predictions
-          </p>
-        </div>
-
-        {/* Error Display */}
-        {(error || setupError) && (
-          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-red-400 font-medium">Setup Error</p>
-              <p className="text-red-400/70 text-sm">
-                {error || (setupError?.suggestion 
-                  ? `${setupError.message} ${setupError.suggestion}`
-                  : setupError?.message)}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Step 1: Twitch Connected (always complete in extension context) */}
-        <div className="mb-4 rounded-xl border border-green-500/30 bg-green-500/5 p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-500/20 text-green-500">
-              <CheckCircle className="h-4 w-4" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-white text-sm">Twitch Connected</h3>
-              <p className="text-xs text-white/50">
-                Channel ID: {channelId}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Step 2: Connect Wallet */}
-        <div className={cn(
-          'mb-4 rounded-xl border p-4 transition-all',
-          currentStep >= 1
-            ? status?.hasWallet
-              ? 'border-green-500/30 bg-green-500/5'
-              : 'border-purple-500/30 bg-purple-500/5'
-            : 'border-white/10 bg-white/5 opacity-50'
-        )}>
-          <div className="flex items-center gap-3">
-            <div className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-full',
-              status?.hasWallet
-                ? 'bg-green-500/20 text-green-500'
-                : 'bg-purple-500/20 text-purple-400'
-            )}>
-              {status?.hasWallet ? (
-                <CheckCircle className="h-4 w-4" />
-              ) : (
-                <span className="text-sm font-semibold">2</span>
-              )}
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-white text-sm">Connect Your Wallet</h3>
-              <p className="text-xs text-white/50">
-                Receive your fee earnings in USDC
-              </p>
-            </div>
-          </div>
-          
-          {!status?.hasWallet && (
-            <div className="mt-4">
-              {walletAddress ? (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-sm text-white/80 bg-white/5 rounded-lg px-3 py-2">
-                    <Wallet className="w-4 h-4 text-purple-400" />
-                    <span className="font-mono">{walletAddress.slice(0, 8)}...{walletAddress.slice(-6)}</span>
-                  </div>
-                  <button
-                    onClick={handleSetup}
-                    disabled={isSaving}
-                    className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 rounded-lg font-semibold text-white text-sm transition-colors flex items-center justify-center gap-2"
-                  >
-                    {isSaving ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Setting up...
-                      </>
-                    ) : saveSuccess ? (
-                      <>
-                        <CheckCircle className="w-4 h-4" />
-                        Saved!
-                      </>
-                    ) : (
-                      'Save & Continue'
-                    )}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => login()}
-                  disabled={isWalletLoading}
-                  className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/50 rounded-lg font-semibold text-white text-sm transition-colors flex items-center justify-center gap-2"
-                >
-                  {isWalletLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Wallet className="w-4 h-4" />
-                  )}
-                  Connect Wallet
-                </button>
-              )}
-            </div>
-          )}
-          
-          {status?.hasWallet && status.walletAddress && (
-            <div className="mt-3 flex items-center gap-2 text-sm text-green-400">
-              <span className="font-mono">{status.walletAddress.slice(0, 8)}...{status.walletAddress.slice(-6)}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Step 3: Enable Prediction Sync */}
-        <div className={cn(
-          'mb-4 rounded-xl border p-4 transition-all',
-          status?.hasSubscriptions
-            ? 'border-green-500/30 bg-green-500/5'
-            : status?.hasWallet
-              ? 'border-purple-500/30 bg-purple-500/5'
-              : 'border-white/10 bg-white/5 opacity-50'
-        )}>
-          <div className="flex items-center gap-3">
-            <div className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-full',
-              status?.hasSubscriptions
-                ? 'bg-green-500/20 text-green-500'
-                : status?.hasWallet
-                  ? 'bg-purple-500/20 text-purple-400'
-                  : 'bg-white/10 text-white/30'
-            )}>
-              {status?.hasSubscriptions ? (
-                <CheckCircle className="h-4 w-4" />
-              ) : (
-                <span className="text-sm font-semibold">3</span>
-              )}
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-white text-sm">Enable Prediction Sync</h3>
-              <p className="text-xs text-white/50">
-                Authorize us to sync your Twitch predictions
-              </p>
-            </div>
-          </div>
-          
-          {status?.hasWallet && !status.hasSubscriptions && (
-            <div className="mt-4">
-              <a
-                href={`${API_BASE_URL}/streamer`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2.5 bg-[#9147ff] hover:bg-[#772ce8] rounded-lg font-semibold text-white text-sm transition-colors flex items-center justify-center gap-2"
-              >
-                <Twitch className="w-4 h-4" />
-                Complete Setup on Website
-                <ExternalLink className="w-3 h-3" />
-              </a>
-              <p className="text-xs text-white/40 text-center mt-2">
-                Opens in a new tab for Twitch OAuth
-              </p>
-            </div>
-          )}
-          
-          {status?.hasSubscriptions && (
-            <div className="mt-3 text-sm text-green-400">
-              ✓ Prediction sync enabled
-            </div>
-          )}
-        </div>
-
-        {/* Stats Section - Only show when fully set up */}
-        {status?.hasSubscriptions && stats && (
-          <div className="mt-8">
-            <h2 className="text-lg font-semibold text-white mb-4">Your Stats</h2>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <BarChart3 className="w-4 h-4 text-purple-400 mb-1" />
-                <div className="text-xl font-bold text-white">{stats.totalMarkets}</div>
-                <div className="text-xs text-white/50">Markets</div>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <DollarSign className="w-4 h-4 text-green-400 mb-1" />
-                <div className="text-xl font-bold text-white">${stats.totalVolume.toLocaleString()}</div>
-                <div className="text-xs text-white/50">Volume</div>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <DollarSign className="w-4 h-4 text-yellow-400 mb-1" />
-                <div className="text-xl font-bold text-white">${stats.totalFees.toFixed(2)}</div>
-                <div className="text-xs text-white/50">Fees Earned</div>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <Users className="w-4 h-4 text-blue-400 mb-1" />
-                <div className="text-xl font-bold text-white">{stats.activeBettors}</div>
-                <div className="text-xs text-white/50">Bettors</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* How it Works */}
-        <div className="mt-8 rounded-xl border border-purple-500/20 bg-purple-500/5 p-4">
-          <h2 className="text-sm font-semibold text-white mb-3">How it Works</h2>
-          <div className="space-y-3 text-sm">
-            <div className="flex gap-3">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-500/20 text-xs font-medium text-purple-400">1</div>
-              <p className="text-white/70">Create a prediction on Twitch as usual</p>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-500/20 text-xs font-medium text-purple-400">2</div>
-              <p className="text-white/70">We auto-create a USDC market</p>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-500/20 text-xs font-medium text-purple-400">3</div>
-              <p className="text-white/70">Viewers bet through the overlay</p>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-500/20 text-xs font-medium text-green-400">$</div>
-              <p className="text-white/70">You earn <strong className="text-purple-400">1.5%</strong> of all bets!</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <StreamerSetup
+      isTwitchConnected={!!session?.twitchId}
+      twitchDisplayName={session?.twitchDisplayName || session?.twitchLogin}
+      onTwitchConnect={handleTwitchConnect}
+      isTwitchLoading={isOAuthLoading}
+      walletAddress={walletAddress}
+      onWalletConnect={() => login()}
+      isWalletLoading={isWalletLoading}
+      subscriptionStatus={subscriptionStatus}
+      onRetry={retry}
+      // No sign out in extension context - less confusing for users
+    />
   )
 }
-

@@ -5,7 +5,6 @@ import { AuroraBackground } from "@/components/ui/aurora-background";
 import { Header } from "@/components/header";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "./providers";
-import { headers } from "next/headers";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
@@ -26,40 +25,11 @@ export const metadata: Metadata = {
   description: "Open source prediction market platform",
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Check if this is an extension route (overlay or ext-config)
-  const headersList = await headers();
-  const pathname = headersList.get("x-pathname") || headersList.get("x-invoke-path") || "";
-  const isExtensionRoute = pathname.includes("/overlay") || pathname.includes("/ext-config");
-
-  // Extension routes get a minimal layout optimized for Video Component
-  if (isExtensionRoute) {
-    return (
-      <html lang="en" className="dark h-full">
-        <head>
-          {/* Twitch Extension Helper - Required for all Twitch extensions */}
-          <script 
-            src="https://extension-files.twitch.tv/helper/v1/twitch-ext.min.js"
-            // @ts-ignore - strategy not needed for regular script tag
-          />
-        </head>
-        <body className={`${geistSans.variable} ${geistMono.variable} h-full bg-card text-foreground antialiased`}>
-          <Providers>
-            <div className="h-full">
-              {children}
-            </div>
-          </Providers>
-          <SpeedInsights />
-        </body>
-      </html>
-    );
-  }
-
-  // Regular app layout
   return (
     <html lang="en" suppressHydrationWarning>
       <body

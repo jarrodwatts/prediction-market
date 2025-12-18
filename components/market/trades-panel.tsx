@@ -14,8 +14,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useMarketTrades, Trade } from "@/lib/hooks/use-market-trades";
 import { useAbsProfiles } from "@/lib/hooks/use-abs-profiles";
 import { getExplorerTxUrl } from "@/lib/explorer";
-import { formatTimeAgo } from "@/lib/formatters";
-import { formatCompact } from "@/lib/formatters";
+import { formatTimeAgo, formatCurrency } from "@/lib/formatters";
 import { getOutcomeColor } from "@/lib/outcome-colors";
 
 interface TradesPanelProps {
@@ -87,12 +86,11 @@ export function TradesPanel({
           ) : (
             <>
               {/* Column Headers */}
-              <div className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border bg-muted/30">
+              <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-2 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border bg-muted/30">
                 <span>Account</span>
                 <span>Outcome</span>
                 <span className="text-right">Amount</span>
                 <span className="text-right">Time</span>
-                <span className="w-4" />
               </div>
 
               {/* Trades List */}
@@ -139,7 +137,7 @@ function TradeRow({ trade, profile, outcomeName, outcomeColor, chainId }: TradeR
   const amount = Number(trade.amount) / 1_000_000;
 
   return (
-    <div className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 items-center px-4 py-2.5 hover:bg-muted/50 transition-colors">
+    <div className="grid grid-cols-[1fr_1fr_1fr_1fr] gap-2 items-center px-4 py-2.5 hover:bg-muted/50 transition-colors">
       {/* Account */}
       <div className="flex items-center gap-2 min-w-0">
         <Avatar className="h-6 w-6 shrink-0">
@@ -174,23 +172,21 @@ function TradeRow({ trade, profile, outcomeName, outcomeColor, chainId }: TradeR
 
       {/* Amount */}
       <span className="text-sm font-medium tabular-nums text-right">
-        {formatCompact(amount)}
+        {formatCurrency(amount)}
       </span>
 
-      {/* Time */}
-      <span className="text-xs text-muted-foreground text-right whitespace-nowrap">
-        {formatTimeAgo(trade.timestamp)}
-      </span>
-
-      {/* Tx Link */}
+      {/* Time + Tx Link */}
       <a
         href={txUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+        className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors justify-end"
         title="View transaction"
       >
-        <ExternalLink className="h-3.5 w-3.5" />
+        <span className="text-xs whitespace-nowrap">
+          {formatTimeAgo(trade.timestamp)}
+        </span>
+        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
       </a>
     </div>
   );

@@ -15,6 +15,40 @@ interface TwitchProfile {
 }
 
 export const authConfig: NextAuthConfig = {
+  // Trust the Host header when behind a proxy (Cloudflare tunnel, etc.)
+  trustHost: true,
+  // Cookie configuration for third-party iframe context (Twitch extension)
+  // sameSite: 'none' required for cookies to work in cross-origin iframes
+  cookies: {
+    sessionToken: {
+      name: `__Secure-authjs.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'none',
+        path: '/',
+        secure: true,
+      },
+    },
+    callbackUrl: {
+      name: `__Secure-authjs.callback-url`,
+      options: {
+        httpOnly: true,
+        sameSite: 'none',
+        path: '/',
+        secure: true,
+      },
+    },
+    csrfToken: {
+      // Can't use __Host- prefix with sameSite: 'none'
+      name: `__Secure-authjs.csrf-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'none',
+        path: '/',
+        secure: true,
+      },
+    },
+  },
   providers: [
     Twitch({
       clientId: process.env.TWITCH_CLIENT_ID!,

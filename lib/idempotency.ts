@@ -7,6 +7,23 @@ import { TTL } from './config'
 
 const OPERATION_PREFIX = 'operation:'
 
+/**
+ * Serialize a value for JSON storage, converting BigInts to strings
+ */
+function serializeForStorage(value: unknown): unknown {
+  if (value === null || value === undefined) return value
+  if (typeof value === 'bigint') return value.toString()
+  if (Array.isArray(value)) return value.map(serializeForStorage)
+  if (typeof value === 'object') {
+    const result: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value)) {
+      result[k] = serializeForStorage(v)
+    }
+    return result
+  }
+  return value
+}
+
 export type OperationStatus = 'pending' | 'completed' | 'failed'
 
 export interface OperationState {
@@ -53,7 +70,7 @@ export async function completeOperation(
     const state: OperationState = {
       status: 'completed',
       timestamp: Date.now(),
-      result,
+      result: serializeForStorage(result), // Serialize BigInts to strings
     }
     await kvResilient.set(key, state, { ex: TTL.OPERATION })
   } catch {
