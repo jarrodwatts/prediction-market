@@ -23,6 +23,10 @@ export function DashboardView() {
   // Use the centralized markets hook
   const { data: markets, isLoading } = useMarkets();
 
+  // Use a stable reference for current time to satisfy purity rules
+  const [now] = useState(() => Math.floor(Date.now() / 1000));
+  const nowSeconds = BigInt(now);
+
   // Filter and sort markets
   const filteredMarkets = useMemo(() => {
     if (!markets) return [];
@@ -32,7 +36,6 @@ export function DashboardView() {
         // Only show active markets on homepage: open and not past close time.
         // state: 0 Open, 1 Closed, 2 Resolved
         if (market.state !== 0) return false;
-        const nowSeconds = BigInt(Math.floor(Date.now() / 1_000));
         return market.closesAt > nowSeconds;
       })
       .filter((market) =>

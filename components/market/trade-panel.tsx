@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, DollarSign, Wallet, Coins, Lock } from "lucide-react";
+import { Loader2, DollarSign, Wallet, Coins, Lock, Clock } from "lucide-react";
 import { useReadContract, useAccount, usePublicClient } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
 import { formatUnits, parseAbiItem } from "viem";
@@ -17,12 +17,29 @@ import { useTradingPanel } from "@/lib/hooks/use-trading-panel";
 import { queryKeys } from "@/lib/query-keys";
 import { USDC, formatUSDC } from "@/lib/tokens";
 import { TRADING } from "@/lib/constants";
+import { useCountdown, formatCountdown } from "@/lib/hooks/use-countdown";
 
 interface TradePanelProps {
   market: MarketData;
   selectedOutcome: number;
   onOutcomeChange: (outcome: number) => void;
   embedded?: boolean;
+  /** Visual variant - 'compact' for overlay, 'default' for main app */
+  variant?: 'default' | 'compact';
+  /** Quick amount button mode - 'percentage' (25%/50%/100%) or 'fixed' ($10/$25/$50) */
+  quickAmountMode?: 'percentage' | 'fixed';
+  /** Show countdown timer in header */
+  showCountdown?: boolean;
+  /** Unix timestamp for countdown (overrides market.closesAt) */
+  closesAt?: number;
+  /** Callback when bet is successfully placed */
+  onBetSuccess?: () => void;
+  /** Callback when winnings/refund is successfully claimed */
+  onClaimSuccess?: () => void;
+  /** Sort outcomes by price (default: true). Set to false for overlay to prevent jumping. */
+  sortOutcomes?: boolean;
+  /** Whether the market is currently being created */
+  isPending?: boolean;
 }
 
 export function TradePanel({
@@ -30,6 +47,14 @@ export function TradePanel({
   selectedOutcome,
   onOutcomeChange,
   embedded = false,
+  variant = 'default',
+  quickAmountMode = 'percentage',
+  showCountdown = false,
+  closesAt,
+  onBetSuccess,
+  onClaimSuccess,
+  sortOutcomes = true,
+  isPending = false,
 }: TradePanelProps) {
   const [amount, setAmount] = useState("");
   
@@ -50,6 +75,7 @@ export function TradePanel({
     hasAnyPosition,
     positionsByOutcome: positionIndices,
     isLoadingPools,
+    refetchPools,
   } = useTradingPanel({
     marketId: market.id,
     outcomeCount: market.outcomeCount,
@@ -59,9 +85,17 @@ export function TradePanel({
     enableEvents: true,
   });
 
+  // Countdown timer for market close
+  const closesAtUnix = closesAt ?? Number(market.closesAt);
+  const remainingSeconds = useCountdown(closesAtUnix > 0 ? closesAtUnix : null);
+  const timeRemaining = closesAtUnix <= 0 ? null : remainingSeconds <= 0 ? 'Closed' : formatCountdown(remainingSeconds);
+
   const marketAction = useMarketAction(market.id, {
     onSuccess: () => {
       setAmount("");
+      // Force immediate refetch of pools to update odds
+      refetchPools();
+      onBetSuccess?.();
     },
   });
 
@@ -81,10 +115,45 @@ export function TradePanel({
   const claimableAmount = claimableData ? claimableData[0] : 0n;
   const canClaim = claimableData ? claimableData[1] : false;
 
-  // Only show skeleton on initial load when no pools data exists
-  // During background refetches, pools maintains its previous value (SWR pattern)
+  const resolvedOutcomeIdx = Number(market.resolvedOutcome);
+  const isResolved = market.state === 2;
+  const isVoided = market.state === 3;
+
+  // Track if winnings have been claimed
+  const { data: hasClaimedWinnings } = useReadContract({
+    address: PREDICTION_MARKET_ADDRESS,
+    abi: PREDICTION_MARKET_ABI,
+    functionName: 'hasClaimed',
+    args: [market.id, BigInt(resolvedOutcomeIdx), address!],
+    query: {
+      enabled: isConnected && !!address && isResolved && !isVoided,
+    }
+  });
+
+  // Get market contract data for payout calculation
+  const { data: marketContractData } = useReadContract({
+    address: PREDICTION_MARKET_ADDRESS,
+    abi: PREDICTION_MARKET_ABI,
+    functionName: 'markets',
+    args: [market.id],
+    query: {
+      enabled: isResolved && !isVoided,
+    }
+  });
+  const payoutPerShare = marketContractData?.[6] ?? 0n; // Index 6 is payoutPerShare
+
+  // Track if we've loaded pools at least once - prevents skeleton flash during refetches
+  const hasLoadedPoolsRef = useRef(false);
+  useEffect(() => {
+    if (!isLoadingPools && pools !== undefined) {
+      hasLoadedPoolsRef.current = true;
+    }
+  }, [isLoadingPools, pools]);
+
+  // Only show skeleton on FIRST load before any pools data arrives
+  // Once loaded, never show skeleton again regardless of refetch state
   const pricesLoaded = (pools?.length ?? 0) > 0;
-  const showOutcomeSkeleton = !pricesLoaded && isLoadingPools;
+  const showOutcomeSkeleton = !hasLoadedPoolsRef.current && !pricesLoaded && isLoadingPools;
 
   const outcomeTitles = market.outcomes && market.outcomes.length === market.outcomeCount
     ? market.outcomes
@@ -92,24 +161,60 @@ export function TradePanel({
       ? ["Yes", "No"]
       : Array.from({ length: market.outcomeCount }).map((_, i) => `Option ${i + 1}`);
 
+  if (isPending) {
+    return (
+      <div className={cn(
+        "h-full w-full bg-card",
+        embedded ? "" : "border border-border rounded-xl p-4 sm:p-6"
+      )}>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Creating market...
+        </div>
+        <h2 className="font-semibold mb-4">{market.question}</h2>
+        <div className="space-y-2">
+          {outcomeTitles.map((title, idx) => (
+            <div 
+              key={idx} 
+              className="flex items-center justify-between p-3 rounded-lg border border-border/50 bg-muted/30 opacity-60"
+            >
+              <div className="flex items-center gap-2">
+                <div 
+                  className="w-2 h-2 rounded-full" 
+                  style={{ backgroundColor: getOutcomeColor(title, idx) }} 
+                />
+                <span className="font-medium">{title}</span>
+              </div>
+              <span className="font-mono text-muted-foreground">50.0%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const sortedOutcomes = useMemo(() => {
-    return outcomeTitles
-      .map((title, idx) => ({ title, idx, price: outcomePrices[idx] ?? 0 }))
-      .sort((a, b) => b.price - a.price);
-  }, [outcomeTitles, outcomePrices]);
+    const outcomes = outcomeTitles.map((title, idx) => ({ title, idx, price: outcomePrices[idx] ?? 0 }));
+    // Only sort by price if sortOutcomes is enabled (default for main app, disabled for overlay)
+    return sortOutcomes ? outcomes.sort((a, b) => b.price - a.price) : outcomes;
+  }, [outcomeTitles, outcomePrices, sortOutcomes]);
 
   const handleBet = () => {
     if (!amount) return;
     marketAction.bet(selectedOutcome, amount, needsApproval, outcomeTitles[selectedOutcome]);
   };
 
-  const handleClaimWinnings = () => marketAction.claimWinnings();
-  
-  const handleClaimRefund = () => {
+  const handleClaimWinnings = useCallback(async () => {
+    await marketAction.claimWinnings();
+    onClaimSuccess?.();
+  }, [marketAction, onClaimSuccess]);
+
+  const handleClaimRefund = useCallback(async () => {
     const outcomeIdx = userOutcomeShares.findIndex((s: bigint) => s > 0n);
     if (outcomeIdx === -1) return;
-    marketAction.claimRefund(outcomeIdx);
-  };
+    await marketAction.claimRefund(outcomeIdx);
+    onClaimSuccess?.();
+  }, [userOutcomeShares, marketAction, onClaimSuccess]);
 
   const handlePercentageClick = (percentage: number) => {
     if (usdcBalance) {
@@ -118,13 +223,13 @@ export function TradePanel({
     }
   };
 
+  const handleFixedAmountClick = (amt: number) => {
+    setAmount(amt.toString());
+  };
+
   const now = Date.now();
   const closesAtMs = Number(market.closesAt) * 1_000;
   const isClosed = market.state >= 1 || (closesAtMs > 0 && now >= closesAtMs);
-  const isResolved = market.state === 2;
-  const isVoided = market.state === 3;
-  
-  const resolvedOutcomeIdx = Number(market.resolvedOutcome);
   const hasWinningShares = isResolved && !isVoided && userOutcomeShares[resolvedOutcomeIdx] > 0n;
   const hasVoidedShares = isVoided && userOutcomeShares.some((s: bigint) => s > 0n);
   const winningOutcomeName = isResolved && !isVoided ? (outcomeTitles[resolvedOutcomeIdx] ?? "Unknown") : "";
@@ -134,7 +239,7 @@ export function TradePanel({
     return claimableAmount;
   }, [isResolved, claimableAmount]);
 
-  const { data: userCashflow } = useQuery({
+  const { data: userCashflow, isLoading: isLoadingCashflow } = useQuery({
     queryKey: queryKeys.user.cashflow(market.id.toString(), address?.toLowerCase() ?? ""),
     enabled: !!publicClient && isConnected && !!address && (isClosed || isResolved),
     queryFn: async () => {
@@ -195,16 +300,38 @@ export function TradePanel({
   });
 
   const formatMoney = (v: bigint) => `$${parseFloat(formatUnits(v, USDC.decimals)).toFixed(2)}`;
-  const netReceivedInclClaimable = (userCashflow?.winningsIn ?? 0n) + claimableWinnings;
-  const netSpent = userCashflow?.betOut ?? 0n;
+
+  // Calculate user's total position (shares) as their "bet" amount
+  // This is more reliable than event logs which can fail
+  const totalUserShares = userOutcomeShares.reduce((sum: bigint, s: bigint) => sum + s, 0n);
+
+  // Calculate what user received (works before AND after claiming)
+  const userWinningShares = userOutcomeShares[resolvedOutcomeIdx] ?? 0n;
+  const calculatedPayout = payoutPerShare > 0n
+    ? (userWinningShares * payoutPerShare) / BigInt(1e18)
+    : 0n;
+
+  // Use event-based betOut if available, otherwise fall back to shares
+  const netSpent = (userCashflow?.betOut && userCashflow.betOut > 0n)
+    ? userCashflow.betOut
+    : totalUserShares;
+  
+  // Use calculated payout as "received" - this works regardless of claim status
+  // For resolved markets, use calculated payout; for voided, use net spent (refund)
+  const netReceivedInclClaimable = isResolved 
+    ? calculatedPayout 
+    : isVoided 
+      ? netSpent 
+      : 0n;
   const netPnl = netReceivedInclClaimable - netSpent;
   const absPnl = netPnl < 0n ? -netPnl : netPnl;
   const pnlTone = netPnl > 0n ? "win" : netPnl < 0n ? "loss" : "even";
+
+  // Show PnL story if user has any position (shares) - don't wait for cashflow query
   const showPnlStory =
     isResolved &&
-    (netSpent > 0n ||
-      netReceivedInclClaimable > 0n ||
-      userOutcomeShares.some((s: bigint) => s > 0n));
+    !isVoided &&
+    (totalUserShares > 0n || netReceivedInclClaimable > 0n);
 
   if (isClosed || isResolved || isVoided) {
     return (
@@ -236,7 +363,7 @@ export function TradePanel({
           </div>
         </div>
 
-        <div className="p-4 sm:p-6 w-full">
+        <div className={cn("w-full", variant === 'compact' ? "p-4" : "p-4 sm:p-6")}>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               {isVoided 
@@ -387,9 +514,17 @@ export function TradePanel({
       embedded && "border-0"
     )}>
       <div className="border-b border-border bg-transparent p-4">
-        <div className="flex items-center gap-2">
-          <DollarSign className="w-4 h-4 text-emerald-500" />
-          <span className="font-medium">Place Bet</span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <DollarSign className="w-4 h-4 text-emerald-500" />
+            <span className="font-medium">Place Bet</span>
+          </div>
+          {showCountdown && timeRemaining && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
+              <span className="font-mono tabular-nums">{timeRemaining}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -463,17 +598,34 @@ export function TradePanel({
                 />
               </div>
               <div className="flex gap-1 shrink-0">
-                {TRADING.PERCENTAGE_OPTIONS.map((pct) => (
-                  <Button 
-                    key={pct}
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => handlePercentageClick(pct)}
-                    className="px-2 min-w-12"
-                  >
-                    {pct * 100}%
-                  </Button>
-                ))}
+                {quickAmountMode === 'fixed' ? (
+                  TRADING.BET_AMOUNTS.map((amt) => (
+                    <Button
+                      key={amt}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleFixedAmountClick(amt)}
+                      className={cn(
+                        "px-2 min-w-12",
+                        amount === amt.toString() && "border-primary bg-primary/10 text-primary"
+                      )}
+                    >
+                      ${amt}
+                    </Button>
+                  ))
+                ) : (
+                  TRADING.PERCENTAGE_OPTIONS.map((pct) => (
+                    <Button
+                      key={pct}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePercentageClick(pct)}
+                      className="px-2 min-w-12"
+                    >
+                      {pct * 100}%
+                    </Button>
+                  ))
+                )}
               </div>
             </div>
           </div>

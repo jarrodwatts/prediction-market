@@ -11,58 +11,46 @@ import { Loader2, CheckCircle, XCircle } from 'lucide-react'
  * Waits for session to be established, then notifies parent and closes.
  */
 export default function PopupCallbackPage() {
-  const { data: session, status, update } = useSession()
-  const [state, setState] = useState<'loading' | 'success' | 'error'>('loading')
+  const { data: session, update } = useSession()
+  const [isError, setIsError] = useState(false)
   const attemptCount = useRef(0)
   const maxAttempts = 10
 
+  // Derive state from session and error status
+  const state = session?.twitchId ? 'success' : (isError ? 'error' : 'loading')
+
   useEffect(() => {
+    // If we're already in a final state, don't do anything
+    if (state !== 'loading') {
+      if (state === 'success' && window.opener) {
+        window.opener.postMessage({ type: 'oauth-success', twitchId: session?.twitchId }, '*')
+        setTimeout(() => window.close(), 500)
+      } else if (state === 'error' && window.opener) {
+        window.opener.postMessage({ type: 'oauth-error', error: 'Session not established' }, '*')
+        setTimeout(() => window.close(), 2000)
+      }
+      return
+    }
+
     const checkSession = async () => {
       attemptCount.current++
       
       // Force a session refresh
       await update()
       
-      // Check if we have a valid session now
-      if (session?.twitchId) {
-        setState('success')
-        // Notify parent window of success
-        if (window.opener) {
-          window.opener.postMessage({ type: 'oauth-success', twitchId: session.twitchId }, '*')
-        }
-        // Close after brief delay
-        setTimeout(() => window.close(), 500)
-        return
-      }
-
       // If still loading and haven't exceeded attempts, try again
       if (attemptCount.current < maxAttempts) {
         setTimeout(checkSession, 500)
       } else {
         // Give up after max attempts
-        setState('error')
-        if (window.opener) {
-          window.opener.postMessage({ type: 'oauth-error', error: 'Session not established' }, '*')
-        }
-        setTimeout(() => window.close(), 2000)
+        setIsError(true)
       }
     }
 
     // Start checking after initial render
     const timer = setTimeout(checkSession, 500)
     return () => clearTimeout(timer)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Also react to session changes from useSession
-  useEffect(() => {
-    if (session?.twitchId && state === 'loading') {
-      setState('success')
-      if (window.opener) {
-        window.opener.postMessage({ type: 'oauth-success', twitchId: session.twitchId }, '*')
-      }
-      setTimeout(() => window.close(), 500)
-    }
-  }, [session, state])
+  }, [state, update, session?.twitchId])
 
   if (state === 'loading') {
     return (

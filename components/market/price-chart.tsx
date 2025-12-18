@@ -29,10 +29,12 @@ export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0, outcom
   // Use centralized market history hook
   const { data: chartData, isLoading } = useMarketHistory(marketId);
 
+  // Use a stable reference for current time to satisfy purity rules
+  const [now] = useState(() => Date.now());
+
   // Filter data based on timeframe
   const filteredData = useMemo(() => {
       if (!chartData) return [];
-      const now = Date.now();
       let cutoff = 0;
       
       switch (timeFrame) {
@@ -57,7 +59,7 @@ export function PriceChart({ marketId, outcomeCount, selectedOutcome = 0, outcom
       }
 
       return filtered;
-  }, [chartData, timeFrame]);
+  }, [chartData, timeFrame, now]);
 
   // Helper to get outcome title
   const getOutcomeTitle = (index: number) => {

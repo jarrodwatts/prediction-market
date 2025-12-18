@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "../providers";
 import "../globals.css";
+import Script from "next/script";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,7 +36,10 @@ export default function ExtensionLayout({
     <html lang="en" className="dark h-full">
       <head>
         {/* Twitch Extension Helper - Required for all Twitch extensions */}
-        <script src="https://extension-files.twitch.tv/helper/v1/twitch-ext.min.js" />
+        <Script 
+          src="https://extension-files.twitch.tv/helper/v1/twitch-ext.min.js" 
+          strategy="beforeInteractive" 
+        />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} h-full bg-card text-foreground antialiased`}>
         <Providers>

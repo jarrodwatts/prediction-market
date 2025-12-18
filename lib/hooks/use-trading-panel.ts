@@ -71,6 +71,7 @@ export function useTradingPanel({
   const { balance: usdcBalance, allowance: usdcAllowance, balanceFormatted } = useUsdcBalance()
 
   // Get market pools
+  // Using staleTime to reduce unnecessary refetches and keep data stable during background updates
   const { data: pools, isLoading: isLoadingPools, refetch: refetchPools } = useReadContract({
     address: PREDICTION_MARKET_ADDRESS,
     abi: PREDICTION_MARKET_ABI,
@@ -79,6 +80,7 @@ export function useTradingPanel({
     query: {
       enabled: !!marketId,
       refetchInterval: 5_000,
+      staleTime: 3_000, // Consider data fresh for 3 seconds
     },
   })
 
@@ -91,6 +93,7 @@ export function useTradingPanel({
     query: {
       enabled: !!marketId && isConnected && !!address,
       refetchInterval: 5_000,
+      staleTime: 3_000, // Consider data fresh for 3 seconds
     },
   })
 

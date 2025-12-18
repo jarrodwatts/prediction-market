@@ -7,12 +7,12 @@
  * Used by the popup OAuth flow for extension config.
  */
 
-import { useEffect } from 'react'
+import { useEffect, Suspense } from 'react'
 import { signIn } from 'next-auth/react'
 import { useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 
-export default function SignInPage() {
+function SignInContent() {
   const searchParams = useSearchParams()
   const callbackUrl = searchParams.get('callbackUrl') || '/auth/popup-callback'
 
@@ -28,6 +28,18 @@ export default function SignInPage() {
         <p className="text-sm text-muted-foreground">Redirecting to Twitch...</p>
       </div>
     </div>
+  )
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
+      </div>
+    }>
+      <SignInContent />
+    </Suspense>
   )
 }
 

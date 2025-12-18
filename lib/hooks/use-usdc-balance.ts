@@ -28,6 +28,7 @@ export function useUsdcBalance(options?: {
     query: {
       enabled: isConnected && !!address,
       refetchInterval,
+      staleTime: 5_000, // Keep data fresh for 5 seconds
     },
   })
 
@@ -39,6 +40,7 @@ export function useUsdcBalance(options?: {
     query: {
       enabled: isConnected && !!address,
       refetchInterval,
+      staleTime: 5_000, // Keep data fresh for 5 seconds
     },
   })
 
